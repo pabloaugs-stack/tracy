@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+:root {
+  --tracy-bg: #0D0D0D;
+  --tracy-surface: #1C1C1C;
+  --tracy-border: #2A2A2A;
+  --tracy-gold: #C9A96E;
+  --tracy-gold-light: #E8D5B0;
+  --tracy-text: #F5F5F0;
+  --tracy-muted: #888888;
+}
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --color-tracy-bg: var(--tracy-bg);
+  --color-tracy-surface: var(--tracy-surface);
+  --color-tracy-border: var(--tracy-border);
+  --color-tracy-gold: var(--tracy-gold);
+  --color-tracy-gold-light: var(--tracy-gold-light);
+  --color-tracy-text: var(--tracy-text);
+  --color-tracy-muted: var(--tracy-muted);
+}
+
+body {
+  background-color: var(--tracy-bg);
+  color: var(--tracy-text);
+}
