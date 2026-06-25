@@ -1,12 +1,14 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 
 type Status = 'loading' | 'error'
 
-export default function AcceptInvitePage() {
+// Componente interno: usa useSearchParams(), por isso precisa viver dentro de um
+// <Suspense> (exigência do App Router no prerender — senão o build falha ao exportar).
+function AcceptInviteHandler() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [status, setStatus] = useState<Status>('loading')
@@ -66,9 +68,22 @@ export default function AcceptInvitePage() {
     )
   }
 
+  return <ProcessingScreen />
+}
+
+// Tela de carregamento reutilizada como fallback do Suspense e como estado inicial.
+function ProcessingScreen() {
   return (
     <div className="min-h-screen bg-tracy-bg flex items-center justify-center">
       <p className="text-tracy-muted text-sm">Processando convite…</p>
     </div>
+  )
+}
+
+export default function AcceptInvitePage() {
+  return (
+    <Suspense fallback={<ProcessingScreen />}>
+      <AcceptInviteHandler />
+    </Suspense>
   )
 }
