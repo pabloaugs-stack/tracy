@@ -262,6 +262,7 @@ export function AgendaGrid(props: Props) {
           services={props.services}
           professionals={props.professionals}
           paymentMethods={props.paymentMethods}
+          colors={props.colors}
           cardTree={props.cardTree}
           cardFeePassthrough={props.cardFeePassthrough}
           depositDefault={props.depositDefault}

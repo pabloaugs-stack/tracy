@@ -22,6 +22,7 @@
     "test:products": "tsx scripts/test-products.ts",
     "test:stock-2-levels": "tsx scripts/test-stock-2-levels.ts",
     "test:material-stock": "tsx scripts/test-material-stock.ts",
+    "test:material-create": "tsx scripts/test-material-create.ts",
     "test:reports": "tsx scripts/test-reports.ts",
     "test:agenda-count": "tsx scripts/test-agenda-count.ts",
     "test:dashboard-metrics": "tsx scripts/test-dashboard-metrics.ts",

@@ -291,6 +291,7 @@ export function ComandaDetailModal(props: Props) {
               services={props.services}
               professionals={props.professionals}
               paymentMethods={props.paymentMethods}
+              colors={props.colors}
               defaultDate={brazilToday()}
               canManageClients={currentUser.canManageClients}
               discountLimitPercent={currentUser.discountLimitPercent}

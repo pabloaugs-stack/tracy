@@ -10,10 +10,12 @@ import type {
   ServiceCategoryRow,
   UserRow,
   PaymentMethodRow,
+  MaterialColorRow,
   RoleInAppointment,
 } from '@/lib/types/database'
 import type { CardMachineTree } from '@/lib/queries/card-machines'
 import { CARD_BRAND_LABELS } from '@/lib/card-templates'
+import { ComandaMaterialsCreateSection } from './ComandaMaterialsCreateSection'
 
 // ── Tipos locais ──────────────────────────────────────────────────────────────
 
@@ -25,7 +27,8 @@ interface ProfEntry {
 }
 
 // Dados para pré-preencher o form no modo edição.
-// Materiais NÃO ficam aqui — são geridos como linhas vivas no modal da comanda (com baixa de estoque).
+// Materiais NÃO entram no initialData: na CRIAÇÃO são escolhidos em estado local na própria seção
+// (ComandaMaterialsCreateSection) e serializados no FormData; na EDIÇÃO viram linhas vivas no modal.
 export interface ComandaInitialData {
   clientId: string
   serviceId: string
@@ -50,6 +53,8 @@ interface Props {
   services: ServiceRow[]
   professionals: UserRow[]
   paymentMethods: PaymentMethodRow[]
+  // Cores de material ativas do salão — usadas pela seção de material na CRIAÇÃO (modo create).
+  colors: MaterialColorRow[]
   defaultDate: string
   canManageClients: boolean
   discountLimitPercent: number | null
@@ -73,6 +78,23 @@ function formatBRL(value: number): string {
 function formatPrice(value: number): string {
   if (value === 0) return ''
   return ` — ${formatBRL(value)}`
+}
+
+// Traduz códigos de erro do servidor (insertAppointment) para mensagem amigável.
+// Códigos não mapeados caem no default (texto cru) — comportamento anterior preservado.
+function translateFormError(code: string): string {
+  switch (code) {
+    case 'estoque_insumo_insuficiente':
+      return 'Estoque de material insuficiente para a cor escolhida. Reponha o estoque ou remova a cor.'
+    case 'credito_requer_dados_cartao':
+      return 'Selecione maquininha, bandeira e parcelamento do sinal no crédito.'
+    case 'arvore_cartao_inconsistente':
+      return 'Configuração de cartão inconsistente. Revise as maquininhas em Configurações.'
+    case 'data_sinal_invalida':
+      return 'A data do recebimento do sinal não pode ser futura.'
+    default:
+      return code
+  }
 }
 
 function computeFinalTotal(
@@ -107,6 +129,7 @@ export function ComandaForm({
   services,
   professionals,
   paymentMethods,
+  colors,
   defaultDate,
   canManageClients,
   discountLimitPercent,
@@ -312,7 +335,7 @@ export function ComandaForm({
       >
         {state?.error && state.error !== 'profissional_obrigatorio' && (
           <p className="text-red-400 text-sm bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
-            {state.error}
+            {translateFormError(state.error)}
           </p>
         )}
 
@@ -514,7 +537,10 @@ export function ComandaForm({
           <input type="hidden" name="prof_count" value={profEntries.length} />
         </div>
 
-        {/* Cores do material são adicionadas no detalhe da comanda (com baixa de estoque). */}
+        {/* ── COR DE MATERIAL (só na criação) ──
+            A maioria das comandas já nasce com a cor conhecida (cliente trouxe/escolheu antes).
+            Na edição, o material vira linha viva no modal (ComandaMaterialsSection), então aqui não aparece. */}
+        {mode === 'create' && <ComandaMaterialsCreateSection colors={colors} />}
 
         {/* ── DESCONTO ── */}
         {selectedService && (

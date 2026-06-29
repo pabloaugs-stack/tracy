@@ -155,7 +155,7 @@ Coberto por `test:stock-2-levels` (14/14), `test:material-stock` (11/11), `test:
 
 **Estoque com 2 níveis:** `products.ideal_stock` e `material_colors.ideal_stock`/`min_stock` (todos nullable). Badge (`lib/stock.ts` → `stockLevel`): `qty ≤ min` = **baixo** (vermelho); `min < qty ≤ ideal` = **atenção** (dourado-atenuado); senão sem badge. Validação `ideal ≥ mínimo` na Action. Badge em Catálogo>Produtos e Estoque (Produtos e Insumos). Componente `StockBadge`.
 
-**Quantidade + baixa de insumo na comanda:** `appointment_materials` ganhou `quantity` (≥1) e `active` (soft delete). **Materiais deixaram de ser geridos no `ComandaForm`** (criação/edição) e passaram a ser **linhas vivas no modal** (`ComandaMaterialsSection`, igual produtos): adicionar/qty±/remover com baixa de estoque via RPC. RPC **`adjust_material_color_stock(color, salon, delta)`** (mesma estrutura/segurança do `adjust_product_stock` — SECURITY DEFINER, EXECUTE revogado, admin-only). Baixa na adição; aumentar baixa a diferença; diminuir/remover devolve; **cancelar** devolve todos os materiais e marca linhas `active=false`; comanda fechada = read-only. Erro `estoque_insumo_insuficiente`. Policy `appointment_materials_modify` ampliada para `can_create OR has_appointment`.
+**Quantidade + baixa de insumo na comanda:** `appointment_materials` ganhou `quantity` (≥1) e `active` (soft delete). No BLOCO 10 os materiais saíram do `ComandaForm` e viraram **linhas vivas no modal** (`ComandaMaterialsSection`, igual produtos): adicionar/qty±/remover com baixa de estoque via RPC. **(Revisado no BLOCO Fix — cor na criação: a escolha de cor VOLTOU ao `ComandaForm` no modo criação, ver abaixo. A gestão como linha viva no modal continua valendo na edição/visualização.)** RPC **`adjust_material_color_stock(color, salon, delta)`** (mesma estrutura/segurança do `adjust_product_stock` — SECURITY DEFINER, EXECUTE revogado, admin-only). Baixa na adição; aumentar baixa a diferença; diminuir/remover devolve; **cancelar** devolve todos os materiais e marca linhas `active=false`; comanda fechada = read-only. Erro `estoque_insumo_insuficiente`. Policy `appointment_materials_modify` ampliada para `can_create OR has_appointment`.
 
 **Relatórios (Sprint 6)** em `/admin/relatorios` (sidebar entre Estoque e Equipe, **role dono/gerente**, gate `canAccessReports`). Landing com cards; cada relatório tem filtro de período (hoje/7d/30d/mês atual/mês anterior/12m/custom via `?period=&start=&end=`) e **Exportar CSV**. Queries em `lib/queries/reports/*`. Os 8: (1) agendamentos por status [barras], (2) atendimentos por profissional + ticket médio, (3) ranking de serviços, (4) ranking de produtos, (5) faturamento por mês [linha], (6) uso por forma de pagamento [pizza], (7) comissão por profissional (serviço vs produto, via snapshot), (8) retorno de cliente. Gráficos em SVG/divs inline (sem libs).
 
@@ -212,6 +212,19 @@ Coberto por `test:financial-entries` (34/34). **Validado visualmente pelo Pablo*
 
 ---
 
+## BLOCO Fix — Cor de material na criação da comanda (implementado, aguardando validação visual do Pablo)
+Coberto por `test:material-create` (15/15) + `test:material-stock` (regressão, segue verde). Revisão de design de uma decisão do BLOCO 10.
+
+**Decisão de produto:** na maioria das comandas a trancista já sabe a cor do material no momento da criação (cliente trouxe/escolheu antes). Esconder a escolha até depois de criar a comanda fazia a maioria nascer com material "invisível" pro estoque. **A escolha de cor voltou ao fluxo de criação** — visível por padrão. "Cliente define no dia" continua existindo (não escolher cor nenhuma = não baixa estoque; pode adicionar depois no modal, fluxo do BLOCO 10 intacto).
+
+**UI:** novo componente `nova-comanda/_components/ComandaMaterialsCreateSection.tsx` — seção "Cores do material" renderizada no `ComandaForm` **só no `mode==='create'`** (na edição, material segue como linha viva no modal). Estado local (sem appointment_id ainda) serializado no FormData: `mat_count`, `mat_type_{i}`, `mat_color_id_{i}`, `mat_quantity_{i}` — mesmo padrão dos profissionais. Inclui criação de cor inline (`createMaterialColorInlineAction`, sem `<form>` aninhado). `ComandaForm` ganhou prop `colors`, passada nos 3 call sites (nova-comanda/page, `ComandaCreateModal` via `AgendaGrid`, e o edit do `ComandaDetailModal`).
+
+**Servidor (`insertAppointment`):** parse + validação de forma/existência da cor **antes** do insert da comanda (sem efeito colateral). Depois de criar comanda + profissionais + sinal, aplica os materiais: para cada cor, baixa via RPC `adjust_material_color_stock` (admin, nunca-negativo) + insere a linha (client normal/RLS). **Atômico:** se qualquer baixa falhar (`estoque_insumo_insuficiente`) ou uma linha não inserir, `rollbackCreation()` devolve o estoque já baixado e **apaga a comanda recém-criada + filhos** (hard delete seguro — comanda nunca chegou a existir validamente; filhos antes do appointment por causa das FKs RESTRICT). Nada de comanda pela metade. Cobre os 2 wrappers (`createAppointmentAction` + `createAppointmentInlineAction`) por estarem no núcleo. Tradutor de erro amigável no `ComandaForm` (`translateFormError`).
+
+**Não mexeu:** produtos (seguem só pós-criação no modal — decisão separada); estrutura de lote/FIFO do Sprint 7 Fatia 2 (não existe ainda — baixa continua no modelo de estoque atual).
+
+---
+
 ## ✅ Concluído
 Sprint 1 (Fundação) · Sprint 2 (Auth/permissões) · Sprint 3 (Catálogo + templates AUG) · Sprint 4 Fatias 1–2 (clientes + comanda + profissionais) e Fatia 3 (status + busca) · BLOCO 7 (pagamento) · BLOCO 8 (agenda grid) · BLOCO 8.1 (dona solo + refinos) · BLOCO 8.1.1 (fixes) · BLOCO 9 (produtos + estoque) · BLOCO 10 (estoque 2 níveis + baixa de insumo + Relatórios MVP — **validado visualmente pelo Pablo**, 8/8 itens do checklist) · BLOCO 11 (fix subheader agenda + Dashboard de métricas + cadastro da árvore de cartão — **validado visualmente pelo Pablo**) · BLOCO Pagamento dividido (N formas no fechamento + consumo da árvore de cartão; sinal de crédito usa a árvore; "à vista" = 1x; repasse de taxa ao cliente opcional — **validado visualmente pelo Pablo**) · **Sprint 7 / Fatia 1 — Lançamentos financeiros** (entradas/saídas, recorrência preguiçosa, gate `can_view_financial`, dashboard de vencimentos, projeção somente-leitura, despesas fixas ativas — **validado visualmente pelo Pablo**, `test:financial-entries` 34/34).
 
@@ -219,7 +232,7 @@ Sprint 1 (Fundação) · Sprint 2 (Auth/permissões) · Sprint 3 (Catálogo + te
 Entre a **Fatia 1 (concluída)** e a **Fatia 2**, o Pablo vai parar o fluxo de desenvolvimento para **conectar o repositório ao GitHub e configurar deploy na Vercel**. Não é tarefa de código de nenhum bloco — é infra/devops. Se o handoff for lido por um chat novo e houver um intervalo no meio do Sprint 7, é por isso. Retomar pela **Fatia 2 (estoque por lote / FIFO + custo)** quando o Pablo voltar.
 
 ## ⚠️ Em andamento
-- _(nada em andamento — Fatia 1 concluída; pausa de infra antes da Fatia 2, ver acima)_
+- **BLOCO Fix — Cor de material na criação da comanda:** implementado, `test:material-create` 15/15, type-check limpo. **Aguardando validação visual do Pablo** (criar comanda escolhendo cor → estoque baixa; "define no dia" → não baixa; estoque insuficiente → não cria comanda). Depois disso, retomar a pausa de infra antes da Fatia 2.
 
 ## 🐞 Pendências abertas (não bloqueiam fila)
 - _(nenhuma — o bug do subheader da agenda foi resolvido no BLOCO 11, PARTE A.)_

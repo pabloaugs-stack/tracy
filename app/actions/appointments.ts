@@ -11,7 +11,7 @@ import { getActiveAppointmentProducts, type AppointmentProductLine } from '@/lib
 import { getActiveAppointmentMaterials, type AppointmentMaterialLine } from '@/lib/queries/appointment-materials'
 import { getInstallmentFee } from '@/lib/queries/card_tree'
 import { round2, cardFeeAmount } from '@/lib/payments/card-fee'
-import type { AppointmentStatus, RoleInAppointment, DiscountType, AppointmentPaymentInsert } from '@/lib/types/database'
+import type { AppointmentStatus, RoleInAppointment, DiscountType, MaterialType, AppointmentPaymentInsert } from '@/lib/types/database'
 
 export type AppointmentActionState = { error: string } | undefined
 export type CloseActionResult = { error?: string }
@@ -179,6 +179,35 @@ async function insertAppointment(
 
   const deposit_value = deposit_value_num ?? null
 
+  // ── Materiais (cor) escolhidos já na criação ──
+  // "Cliente define no dia" = nenhuma cor enviada (mat_count 0 ou linhas sem cor) → não baixa estoque.
+  // Aqui só PARSE + validação de forma e existência da cor (sem efeito colateral). A baixa real só
+  // acontece após criar a comanda (precisa do appointment_id) — assim um erro de validação não deixa
+  // comanda pela metade.
+  const matCount = parseInt((formData.get('mat_count') as string | null) ?? '0', 10)
+  const materialsToApply: { color_id: string; type: MaterialType; quantity: number }[] = []
+  for (let i = 0; i < matCount; i++) {
+    const colorId = (formData.get(`mat_color_id_${i}`) as string | null)?.trim()
+    if (!colorId) continue // linha sem cor escolhida = define no dia; ignora
+    const typeRaw = (formData.get(`mat_type_${i}`) as string | null)?.trim()
+    if (typeRaw !== 'jumbo' && typeRaw !== 'cachos') return { error: 'Tipo de material inválido.' }
+    const qtyRaw = (formData.get(`mat_quantity_${i}`) as string | null)?.trim()
+    const quantity = qtyRaw ? Math.trunc(parseFloat(qtyRaw)) : 0
+    if (!Number.isInteger(quantity) || quantity < 1) return { error: 'Quantidade de material deve ser ao menos 1.' }
+    materialsToApply.push({ color_id: colorId, type: typeRaw, quantity })
+  }
+  // Confere que toda cor referenciada pertence ao salão e está ativa.
+  if (materialsToApply.length > 0) {
+    const colorIds = [...new Set(materialsToApply.map((m) => m.color_id))]
+    const { data: validColors } = await supabase
+      .from('material_colors')
+      .select('id, active')
+      .eq('salon_id', profile.salon_id)
+      .in('id', colorIds)
+    const okIds = new Set((validColors ?? []).filter((c) => c.active).map((c) => c.id))
+    if (colorIds.some((id) => !okIds.has(id))) return { error: 'Cor de material inválida ou inativa.' }
+  }
+
   const { data: appointment, error: apptError } = await supabase
     .from('appointments')
     .insert({
@@ -216,9 +245,6 @@ async function insertAppointment(
     if (profError) return { error: profError.message }
   }
 
-  // Materiais não são mais vinculados na criação — passam a ser linhas vivas no modal da comanda
-  // (ComandaMaterialsSection), com baixa de estoque na adição.
-
   // Grava sinal como recebido (active=true) já na criação
   if (deposit_type && depositAmount !== null && deposit_payment_method_id && deposit_paid_at) {
     const { error: payError } = await supabase.from('appointment_payments').insert({
@@ -235,6 +261,51 @@ async function insertAppointment(
       fee_amount: deposit_fee_amount,
     })
     if (payError) return { error: payError.message }
+  }
+
+  // ── Baixa de estoque dos materiais + linhas (atômico) ──
+  // Cada cor: baixa via RPC (admin, nunca-negativo) e insere a linha (RLS, client normal).
+  // Se qualquer baixa falhar (estoque insuficiente) ou uma linha não inserir, DESFAZ TUDO:
+  // devolve o estoque já baixado e apaga a comanda recém-criada + filhos. Nada de comanda "pela metade".
+  if (materialsToApply.length > 0) {
+    const admin = createAdminClient()
+    const applied: { color_id: string; quantity: number }[] = []
+
+    // Rollback: a comanda acabou de nascer e está inválida → hard delete é seguro (sem histórico a
+    // preservar). Filhos antes do appointment por causa das FKs RESTRICT.
+    const rollbackCreation = async () => {
+      for (const m of applied) {
+        await admin.rpc('adjust_material_color_stock', { p_color_id: m.color_id, p_salon_id: profile.salon_id, p_delta: m.quantity })
+      }
+      await admin.from('appointment_materials').delete().eq('appointment_id', appointment.id)
+      await admin.from('appointment_payments').delete().eq('appointment_id', appointment.id)
+      await admin.from('appointment_professionals').delete().eq('appointment_id', appointment.id)
+      await admin.from('appointments').delete().eq('id', appointment.id)
+    }
+
+    for (const m of materialsToApply) {
+      const { data: ok } = await admin.rpc('adjust_material_color_stock', {
+        p_color_id: m.color_id,
+        p_salon_id: profile.salon_id,
+        p_delta: -m.quantity,
+      })
+      if (!ok) {
+        await rollbackCreation()
+        return { error: 'estoque_insumo_insuficiente' }
+      }
+      applied.push({ color_id: m.color_id, quantity: m.quantity })
+
+      const { error: matErr } = await supabase.from('appointment_materials').insert({
+        appointment_id: appointment.id,
+        type: m.type,
+        color_id: m.color_id,
+        quantity: m.quantity,
+      })
+      if (matErr) {
+        await rollbackCreation()
+        return { error: matErr.message }
+      }
+    }
   }
 
   return { id: appointment.id }

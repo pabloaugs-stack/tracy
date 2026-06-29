@@ -10,6 +10,7 @@ import type {
   ServiceCategoryRow,
   UserRow,
   PaymentMethodRow,
+  MaterialColorRow,
 } from '@/lib/types/database'
 import { ComandaForm, type ComandaInitialData } from '../nova-comanda/_components/ComandaForm'
 import type { CurrentUser, DepositDefault } from './AgendaGrid'
@@ -28,6 +29,7 @@ interface Props {
   services: ServiceRow[]
   professionals: UserRow[]
   paymentMethods: PaymentMethodRow[]
+  colors: MaterialColorRow[]
   cardTree: CardMachineTree[]
   cardFeePassthrough: boolean
   depositDefault: DepositDefault
@@ -100,6 +102,7 @@ export function ComandaCreateModal(props: Props) {
             services={props.services}
             professionals={props.professionals}
             paymentMethods={props.paymentMethods}
+            colors={props.colors}
             defaultDate={today}
             canManageClients={currentUser.canManageClients}
             discountLimitPercent={currentUser.discountLimitPercent}

@@ -6,6 +6,7 @@ import { listCategories } from '@/lib/queries/service_categories'
 import { listProfessionals } from '@/lib/queries/users'
 import { listActivePaymentMethods } from '@/lib/queries/payment-methods'
 import { listActiveCardMachineTree } from '@/lib/queries/card-machines'
+import { listActiveColors } from '@/lib/queries/material_colors'
 import { getSalonSettings } from '@/app/actions/salon-settings'
 import { createAppointmentAction } from '@/app/actions/appointments'
 import { ComandaForm } from './_components/ComandaForm'
@@ -17,12 +18,13 @@ function getTodayBrazil(): string {
 export default async function NovaComandaPage() {
   const profile = await getSessionProfile()
 
-  const [clients, categories, services, professionals, paymentMethods, settings, cardTree] = await Promise.all([
+  const [clients, categories, services, professionals, paymentMethods, colors, settings, cardTree] = await Promise.all([
     listClients(profile.salon_id),
     listCategories(profile.salon_id),
     listActiveServicesBySalon(profile.salon_id),
     listProfessionals(profile.salon_id),
     listActivePaymentMethods(profile.salon_id),
+    listActiveColors(profile.salon_id),
     getSalonSettings(),
     listActiveCardMachineTree(profile.salon_id),
   ])
@@ -49,6 +51,7 @@ export default async function NovaComandaPage() {
         services={services}
         professionals={professionals}
         paymentMethods={paymentMethods}
+        colors={colors}
         defaultDate={getTodayBrazil()}
         canManageClients={profile.can_manage_clients}
         discountLimitPercent={profile.discount_limit_percent}
