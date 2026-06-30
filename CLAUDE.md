@@ -60,6 +60,14 @@ Permissões verificadas via middleware Next.js E via RLS no Supabase. Nunca conf
 - Comentários em português. Variáveis e funções em inglês. Mensagens de UI em português.
 - Erros: sempre try/catch, nunca silenciados. Toast de feedback ao usuário em toda ação.
 
+## Disciplina de commits e deploy
+O repositório (`github.com/pabloaugs-stack/tracy`, branch `main`) é a fonte da verdade — **o Vercel faz deploy de produção automaticamente a cada push no `main`**. Edição que fica só no disco não chega ao navegador nem ao próximo chat. Por isso:
+
+- **Fechar um bloco = commit + push.** Confirmar antes de empurrar (é produção). Não considerar um bloco "entregue" enquanto não estiver no `main`.
+- **Toda atualização de `tracy-handoff.md`, `CLAUDE.md` ou `README.md` deve ser commitada e enviada pro GitHub no mesmo push do bloco que gerou a mudança — nunca deixar docs pendentes só no disco.** Commit de docs junto com o código do bloco, ou commit separado de docs imediatamente depois, se o bloco já foi pushado.
+- Mensagem de commit termina com a linha `Co-Authored-By` do agente. Em PowerShell, mensagens multi-linha vão por `git commit -F arquivo.txt` (here-string `@'…'@` quebra com aspas no meio).
+- `git push` no PowerShell escreve progresso no stderr — a "mensagem de erro" `NativeCommandError` é ruído; o que vale é a linha `<old>..<new>  main -> main`. Confirmar com `git rev-list --left-right --count origin/main...HEAD` (`0  0` = sincronizado).
+
 ## Decisões para facilitar o app mobile (fase 2)
 - Toda lógica de negócio em Server Actions ou API routes, nunca acoplada a componentes.
 - Design tokens como variáveis CSS (fáceis de mapear para React Native).
