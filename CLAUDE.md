@@ -83,10 +83,13 @@ Permissões verificadas via middleware Next.js E via RLS no Supabase. Nunca conf
    - ✅ BLOCO 9 — Produtos + Estoque
    - ✅ BLOCO 11 — Fix subheader agenda + Dashboard de métricas + Árvore de cartão (cadastro)
    - ✅ BLOCO Pagamento dividido — N formas no fechamento + consumo da árvore de cartão (taxa snapshot)
+   - ✅ BLOCO Fix — Cor de material na criação da comanda (revisão da decisão do BLOCO 10; baixa atômica + rollback)
 5. Rastreamento de tempo
 6. ✅ Relatórios — BLOCO 10 (estoque 2 níveis + baixa de insumo + Relatórios MVP)
 
-Em andamento: Sprint 7 (financeiro completo) — desenho fechado em 5 fatias (ver `tracy-handoff.md`). **Fatia 1 (Lançamentos)** implementada, aguardando validação visual do Pablo. Fatias 2–5 (estoque por lote/FIFO + custo, comissão automática + comissões a pagar, caixa, lucro real/DRE) na fila; a 5 vai consumir `fee_amount` para o lucro líquido.
+Sprint 7 (financeiro completo) — desenho fechado em 5 fatias (ver `tracy-handoff.md`). **Fatia 1 (Lançamentos)** concluída e validada pelo Pablo. Fatias 2–5 (estoque por lote/FIFO + custo, comissão automática + comissões a pagar, caixa, lucro real/DRE) na fila; a 5 vai consumir `fee_amount` para o lucro líquido.
+
+Último trabalho fechado: **BLOCO Fix — Cor de material na criação** (entre Fatia 1 e Fatia 2). Implementado, `test:material-create` 15/15, commitado e enviado ao `main` (deploy de produção no Vercel disparado). Aguardando validação visual do Pablo. Há uma **pausa de infra planejada** (GitHub + Vercel já conectados) antes de iniciar a Fatia 2.
 
 Fora do MVP (fase 2): gestão de estoque inteligente, integração com fornecedores, app mobile.
 
@@ -257,7 +260,7 @@ Estado consolidado e estável. São constantes do sistema, não changelog — re
 
 ## Constantes arquiteturais — Estoque 2 níveis + Relatórios (BLOCO 10)
 - **Faturamento sempre por `appointment_payments.paid_at`** — NUNCA por `created_at` nem pela data da comanda (`scheduled_at`/`closed_at`). Vale para os relatórios de faturamento por mês e de uso por forma de pagamento. `paid_at` é `date`.
-- **Baixa atômica de insumo:** RPC `adjust_material_color_stock(p_color_id, p_salon_id, p_delta)` — mesmo padrão de `adjust_product_stock` (SECURITY DEFINER, guarda `>= 0`, `EXECUTE` revogado de anon/authenticated → admin-only nas Server Actions). Materiais da comanda (`appointment_materials`, agora com `quantity` + `active`) são **linhas vivas no modal** (não mais no `ComandaForm`), com baixa na adição e devolução em diminuir/remover/cancelar — espelhando produtos.
+- **Baixa atômica de insumo:** RPC `adjust_material_color_stock(p_color_id, p_salon_id, p_delta)` — mesmo padrão de `adjust_product_stock` (SECURITY DEFINER, guarda `>= 0`, `EXECUTE` revogado de anon/authenticated → admin-only nas Server Actions). Materiais da comanda (`appointment_materials`, com `quantity` + `active`) são **linhas vivas no modal** (`ComandaMaterialsSection`) na edição/visualização, com baixa na adição e devolução em diminuir/remover/cancelar — espelhando produtos. **Revisão (BLOCO Fix — cor na criação):** a escolha de cor TAMBÉM acontece na **criação** (`ComandaMaterialsCreateSection`, visível por padrão no `ComandaForm` só em `mode='create'`; estado local serializado em `mat_count`/`mat_type_{i}`/`mat_color_id_{i}`/`mat_quantity_{i}`). A baixa roda no `insertAppointment` **depois** de criar a comanda (precisa do `appointment_id`), e é **atômica com rollback**: se faltar estoque (`estoque_insumo_insuficiente`) ou um insert de linha falhar, devolve o estoque já baixado e apaga a comanda recém-criada + filhos (hard delete seguro — nunca existiu validamente). "Cliente define no dia" = não escolher cor nenhuma (não baixa nada; adiciona depois no modal). **Produtos NÃO mudaram** — seguem só pós-criação no modal.
 - **Níveis de estoque (2):** `min_stock` (alerta forte "baixo": `qty ≤ min`) e `ideal_stock` (alerta leve "atenção": `min < qty ≤ ideal`) em `products` e `material_colors`. Lógica única em `lib/stock.ts` (`stockLevel`); badge em `StockBadge`. Validação `ideal ≥ mínimo` nas Actions.
 - **Relatórios** (`/admin/relatorios`): role dono/gerente (`canAccessReports`, sem flag). Queries em `lib/queries/reports/*` usam o client RLS (escopo por salão automático). Período resolvido em `lib/reports/period.ts`. Comissão de serviço usa `commission_override ?? commission_default_{role}` sobre `total_price`; comissão de produto usa `commission_percent_snapshot` sobre o subtotal da linha (`sold_by_user_id`).
 

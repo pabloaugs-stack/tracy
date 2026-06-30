@@ -1,6 +1,6 @@
 # Tracy — Handoff
 
-Documento de estado vivo do projeto. Lido no início de cada bloco de trabalho, junto com `CLAUDE.md` (constantes arquiteturais) e `TESTING.md` (credenciais de teste). Reflete **BLOCO Pagamento dividido concluído** (último bloco fechado).
+Documento de estado vivo do projeto. Lido no início de cada bloco de trabalho, junto com `CLAUDE.md` (constantes arquiteturais) e `TESTING.md` (credenciais de teste). Reflete até **Sprint 7 / Fatia 1 (Lançamentos) concluída e validada** + **BLOCO Fix (cor de material na criação) implementado e em produção, aguardando validação visual** (último trabalho fechado).
 
 ---
 
@@ -232,7 +232,8 @@ Sprint 1 (Fundação) · Sprint 2 (Auth/permissões) · Sprint 3 (Catálogo + te
 Entre a **Fatia 1 (concluída)** e a **Fatia 2**, o Pablo vai parar o fluxo de desenvolvimento para **conectar o repositório ao GitHub e configurar deploy na Vercel**. Não é tarefa de código de nenhum bloco — é infra/devops. Se o handoff for lido por um chat novo e houver um intervalo no meio do Sprint 7, é por isso. Retomar pela **Fatia 2 (estoque por lote / FIFO + custo)** quando o Pablo voltar.
 
 ## ⚠️ Em andamento
-- **BLOCO Fix — Cor de material na criação da comanda:** implementado, `test:material-create` 15/15, type-check limpo. **Aguardando validação visual do Pablo** (criar comanda escolhendo cor → estoque baixa; "define no dia" → não baixa; estoque insuficiente → não cria comanda). Depois disso, retomar a pausa de infra antes da Fatia 2.
+- **BLOCO Fix — Cor de material na criação da comanda:** implementado, `test:material-create` 15/15, type-check limpo. **Commitado e enviado ao `main`** (commit `a595928`) — deploy de produção no Vercel disparado pelo push. **Aguardando validação visual do Pablo** em produção (criar comanda escolhendo cor → estoque baixa; "define no dia" → não baixa; estoque insuficiente → não cria comanda). Depois disso, retomar a pausa de infra antes da Fatia 2.
+  - **Lição de processo (registrar):** no início da sessão o ambiente reportou "não é repositório git", então as edições ficaram só locais e o relatório de "arquivos tocados" não virou commit. O repo existe (`github.com/pabloaugs-stack/tracy`, deploy automático no Vercel a partir de pushes no `main`). **Fechar bloco = commit + push** (confirmando antes, por ser produção), senão nada chega ao navegador.
 
 ## 🐞 Pendências abertas (não bloqueiam fila)
 - _(nenhuma — o bug do subheader da agenda foi resolvido no BLOCO 11, PARTE A.)_
