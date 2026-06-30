@@ -72,6 +72,22 @@ export function ProductFormModal({ product, showCommissionField, onClose, onSave
           </div>
 
           <div>
+            <label htmlFor="brand" className={labelCls}>Marca <span className="opacity-50">(opcional)</span></label>
+            <input id="brand" name="brand" defaultValue={product?.brand ?? ''} className={inputCls} placeholder="Ex: Salon Line" />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="purchase_unit" className={labelCls}>Unidade de compra <span className="opacity-50">(opcional)</span></label>
+              <input id="purchase_unit" name="purchase_unit" defaultValue={product?.purchase_unit ?? ''} className={inputCls} placeholder="= unidade de consumo" />
+            </div>
+            <div>
+              <label htmlFor="conversion_factor" className={labelCls}>Fator de conversão</label>
+              <input id="conversion_factor" name="conversion_factor" type="number" min="0.0001" step="0.0001" defaultValue={product?.conversion_factor ?? 1} className={inputCls} placeholder="1" />
+            </div>
+          </div>
+
+          <div>
             <label htmlFor="sku" className={labelCls}>Código / SKU <span className="opacity-50">(opcional)</span></label>
             <input id="sku" name="sku" defaultValue={product?.sku ?? ''} className={inputCls} placeholder="Ex: GEL-250" />
           </div>
@@ -81,10 +97,16 @@ export function ProductFormModal({ product, showCommissionField, onClose, onSave
             <textarea id="description" name="description" rows={2} defaultValue={product?.description ?? ''} className={inputCls + ' resize-none'} />
           </div>
 
-          <div>
-            <label htmlFor="quantity_in_stock" className={labelCls}>Estoque inicial *</label>
-            <input id="quantity_in_stock" name="quantity_in_stock" type="number" min="0" step="1" required defaultValue={product?.quantity_in_stock ?? 0} className={inputCls} />
-          </div>
+          {isEdit ? (
+            <p className="text-xs text-tracy-muted bg-tracy-surface border border-tracy-border rounded-lg px-3 py-2">
+              Estoque atual: <span className="text-tracy-text tabular-nums">{product!.quantity_in_stock}</span> {product!.unit}.
+              O estoque sobe via <span className="text-tracy-text">Compras</span> e baixa via correção/comandas — não é editado aqui.
+            </p>
+          ) : (
+            <p className="text-xs text-tracy-muted bg-tracy-surface border border-tracy-border rounded-lg px-3 py-2">
+              Novo produto nasce com estoque 0. Registre uma <span className="text-tracy-text">compra</span> (ou estoque inicial) para abastecer.
+            </p>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <div>

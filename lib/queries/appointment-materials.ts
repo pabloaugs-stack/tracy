@@ -6,10 +6,11 @@ export type AppointmentMaterialLine = {
   type: MaterialType
   color_id: string
   quantity: number
-  color: { name: string }
+  consumption_unit_snapshot: string | null
+  color: { name: string; consumption_unit: string }
 }
 
-// Linhas de material ATIVAS de uma comanda, com nome da cor.
+// Linhas de material ATIVAS de uma comanda, com nome e unidade de consumo da cor.
 export async function getActiveAppointmentMaterials(
   appointmentId: string
 ): Promise<AppointmentMaterialLine[]> {
@@ -17,8 +18,8 @@ export async function getActiveAppointmentMaterials(
   const { data, error } = await supabase
     .from('appointment_materials')
     .select(`
-      id, type, color_id, quantity,
-      color:material_colors!appointment_materials_color_id_fkey(name)
+      id, type, color_id, quantity, consumption_unit_snapshot,
+      color:material_colors!appointment_materials_color_id_fkey(name, consumption_unit)
     `)
     .eq('appointment_id', appointmentId)
     .eq('active', true)

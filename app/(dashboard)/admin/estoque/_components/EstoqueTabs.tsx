@@ -1,190 +1,211 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import {
-  setProductStockAction,
-  setMaterialColorStockAction,
-  setMaterialColorLevelsAction,
-  type ProductActionState,
-} from '@/app/actions/products'
 import type { ProductRow, MaterialColorRow } from '@/lib/types/database'
 import { stockLevel } from '@/lib/stock'
 import { StockBadge } from '@/app/(dashboard)/_components/StockBadge'
+import { ProductsTab } from '@/app/(dashboard)/admin/catalogo/_components/ProductsTab'
+import { PurchaseModal, type PurchaseItem } from './PurchaseModal'
+import { InsumoFormModal } from './InsumoFormModal'
+import { StockCorrectionModal } from './StockCorrectionModal'
+import type { PurchaseListItem } from '@/lib/queries/inventory'
+
+type Tab = 'compras' | 'insumos' | 'produtos'
 
 interface Props {
-  tab: 'insumos' | 'produtos'
+  tab: Tab
+  purchases: PurchaseListItem[]
+  insumos: MaterialColorRow[]
   products: ProductRow[]
-  colors: MaterialColorRow[]
+  purchaseItems: PurchaseItem[]
+  openingAlert: boolean
+  showCommissionField: boolean
 }
 
-const inputCls =
-  'w-20 bg-tracy-bg border border-tracy-border rounded-lg px-2 py-1.5 text-tracy-text text-sm text-right tabular-nums focus:outline-none focus:border-tracy-gold disabled:opacity-50'
+const OPENING_DISMISS_KEY = 'tracy_opening_stock_dismissed'
 
-async function safe(fn: () => Promise<ProductActionState>): Promise<ProductActionState> {
-  try {
-    return await fn()
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : 'Erro' }
-  }
+function brl(v: number) {
+  return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+}
+function formatDate(iso: string) {
+  // iso = YYYY-MM-DD; exibe dd/mm/yyyy sem cair em fuso.
+  const [y, m, d] = iso.split('-')
+  return d && m && y ? `${d}/${m}/${y}` : iso
 }
 
-// Input de quantidade que salva ao sair do campo (onBlur) se mudou.
-function StockInput({ initial, onSave }: { initial: number; onSave: (v: number) => Promise<ProductActionState> }) {
+export function EstoqueTabs({ tab, purchases, insumos, products, purchaseItems, openingAlert, showCommissionField }: Props) {
   const router = useRouter()
-  const [pending, startTransition] = useTransition()
-  const [saved, setSaved] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [purchaseModal, setPurchaseModal] = useState<null | 'purchase' | 'opening'>(null)
+  const [editingInsumo, setEditingInsumo] = useState<MaterialColorRow | null>(null)
+  const [correctingInsumo, setCorrectingInsumo] = useState<MaterialColorRow | null>(null)
+  const [dismissed, setDismissed] = useState(true) // começa oculto até ler o localStorage (evita flash)
 
-  return (
-    <div className="flex items-center gap-2 justify-end">
-      <input
-        type="number"
-        min="0"
-        step="1"
-        defaultValue={initial}
-        disabled={pending}
-        onFocus={() => { setSaved(false); setError(null) }}
-        onBlur={(e) => {
-          const v = parseInt(e.target.value, 10)
-          if (!Number.isInteger(v) || v < 0) { setError('Inválido'); return }
-          if (v === initial) return
-          setError(null)
-          startTransition(async () => {
-            const r = await safe(() => onSave(v))
-            if (r && 'error' in r) { setError(r.error); return }
-            setSaved(true)
-            router.refresh()
-          })
-        }}
-        className={inputCls}
-      />
-      {saved && !pending && <span className="text-[10px] text-green-400 w-10">salvo</span>}
-      {error && <span className="text-[10px] text-red-400 w-10">{error}</span>}
-      {!saved && !error && <span className="w-10" />}
-    </div>
-  )
-}
+  useEffect(() => {
+    setDismissed(localStorage.getItem(OPENING_DISMISS_KEY) === '1')
+  }, [])
 
-// Inputs de mínimo/ideal de insumo, salvos juntos ao sair de qualquer campo.
-function LevelsInput({ colorId, min, ideal }: { colorId: string; min: number | null; ideal: number | null }) {
-  const router = useRouter()
-  const [pending, startTransition] = useTransition()
-  const [error, setError] = useState<string | null>(null)
-  const [curMin, setCurMin] = useState(min)
-  const [curIdeal, setCurIdeal] = useState(ideal)
-
-  function commit(nextMin: number | null, nextIdeal: number | null) {
-    setError(null)
-    startTransition(async () => {
-      const r = await safe(() => setMaterialColorLevelsAction(colorId, nextMin, nextIdeal))
-      if (r && 'error' in r) { setError(r.error); return }
-      router.refresh()
-    })
+  function dismissBanner() {
+    localStorage.setItem(OPENING_DISMISS_KEY, '1')
+    setDismissed(true)
   }
-
-  const parse = (s: string): number | null => {
-    const t = s.trim()
-    if (t === '') return null
-    const n = parseInt(t, 10)
-    return Number.isInteger(n) && n >= 0 ? n : null
-  }
-
-  return (
-    <div className="flex items-center gap-1.5 justify-end">
-      <input
-        type="number" min="0" step="1" placeholder="mín" defaultValue={min ?? ''} disabled={pending}
-        onBlur={(e) => { const v = parse(e.target.value); if (v !== curMin) { setCurMin(v); commit(v, curIdeal) } }}
-        className="w-14 bg-tracy-bg border border-tracy-border rounded-lg px-2 py-1.5 text-tracy-text text-sm text-right tabular-nums focus:outline-none focus:border-tracy-gold disabled:opacity-50"
-        title="Estoque mínimo (alerta de baixa)"
-      />
-      <input
-        type="number" min="0" step="1" placeholder="ideal" defaultValue={ideal ?? ''} disabled={pending}
-        onBlur={(e) => { const v = parse(e.target.value); if (v !== curIdeal) { setCurIdeal(v); commit(curMin, v) } }}
-        className="w-14 bg-tracy-bg border border-tracy-border rounded-lg px-2 py-1.5 text-tracy-text text-sm text-right tabular-nums focus:outline-none focus:border-tracy-gold disabled:opacity-50"
-        title="Estoque ideal"
-      />
-      {error && <span className="text-[10px] text-red-400">{error}</span>}
-    </div>
-  )
-}
-
-export function EstoqueTabs({ tab, products, colors }: Props) {
-  const router = useRouter()
 
   const tabCls = (active: boolean) =>
     `text-sm font-semibold px-4 py-2 border-b-2 transition-colors -mb-px ${
       active ? 'border-tracy-gold text-tracy-text' : 'border-transparent text-tracy-muted hover:text-tracy-text'
     }`
 
+  // Agrupa insumos por marca (sem marca por último).
+  const insumoGroups = (() => {
+    const map = new Map<string, MaterialColorRow[]>()
+    for (const i of insumos) {
+      const key = i.brand?.trim() || ''
+      if (!map.has(key)) map.set(key, [])
+      map.get(key)!.push(i)
+    }
+    return [...map.entries()].sort((a, b) => {
+      if (a[0] === '') return 1
+      if (b[0] === '') return -1
+      return a[0].localeCompare(b[0], 'pt-BR')
+    })
+  })()
+
   return (
     <div>
       <div className="flex items-center gap-1 border-b border-tracy-border mb-6">
-        <button onClick={() => router.push('/admin/estoque?tab=insumos')} className={tabCls(tab === 'insumos')}>
-          Insumos
-        </button>
-        <button onClick={() => router.push('/admin/estoque?tab=produtos')} className={tabCls(tab === 'produtos')}>
-          Produtos
-        </button>
+        <button onClick={() => router.push('/admin/estoque?tab=compras')} className={tabCls(tab === 'compras')}>Compras</button>
+        <button onClick={() => router.push('/admin/estoque?tab=insumos')} className={tabCls(tab === 'insumos')}>Insumos</button>
+        <button onClick={() => router.push('/admin/estoque?tab=produtos')} className={tabCls(tab === 'produtos')}>Produtos</button>
       </div>
 
-      {tab === 'insumos' ? (
-        colors.length === 0 ? (
+      {/* ── COMPRAS ── */}
+      {tab === 'compras' && (
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-bold tracking-tight text-tracy-text">Compras</h2>
+            <button onClick={() => setPurchaseModal('purchase')} className="text-xs bg-tracy-gold text-tracy-bg font-semibold rounded-lg px-3 py-1.5 hover:opacity-90 transition-opacity">
+              + Registrar compra
+            </button>
+          </div>
+
+          {openingAlert && !dismissed && (
+            <div className="mb-5 bg-tracy-gold/10 border border-tracy-gold/30 rounded-xl px-4 py-3.5 flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm text-tracy-text font-semibold">Você tem estoque sem custo registrado.</p>
+                <p className="text-xs text-tracy-muted mt-0.5">
+                  Lance o estoque que já existe para ativar o controle de custo (FIFO). Se não souber o custo, deixe zero.
+                </p>
+                <button onClick={() => setPurchaseModal('opening')} className="mt-2 text-xs bg-tracy-gold text-tracy-bg font-semibold rounded-lg px-3 py-1.5">
+                  Lançar estoque inicial
+                </button>
+              </div>
+              <button onClick={dismissBanner} className="text-tracy-muted hover:text-tracy-text text-sm" aria-label="Dispensar">✕</button>
+            </div>
+          )}
+
+          {purchases.length === 0 ? (
+            <div className="text-center py-16 border border-dashed border-tracy-border rounded-xl">
+              <p className="text-tracy-muted text-sm">Nenhuma compra registrada.</p>
+              <p className="text-tracy-muted text-xs mt-1">Registre sua primeira compra para ativar o controle de custo do estoque.</p>
+            </div>
+          ) : (
+            <div className="bg-tracy-surface border border-tracy-border rounded-xl overflow-hidden">
+              <div className="grid grid-cols-[120px_1fr_120px_120px] px-5 py-2 border-b border-tracy-border/40">
+                <span className="text-[10px] font-semibold text-tracy-muted uppercase tracking-widest">Data</span>
+                <span className="text-[10px] font-semibold text-tracy-muted uppercase tracking-widest">Observações</span>
+                <span className="text-[10px] font-semibold text-tracy-muted uppercase tracking-widest text-right">Itens</span>
+                <span className="text-[10px] font-semibold text-tracy-muted uppercase tracking-widest text-right">Total</span>
+              </div>
+              {purchases.map((p, i) => (
+                <div key={p.id} className={`grid grid-cols-[120px_1fr_120px_120px] items-center px-5 py-3 ${i < purchases.length - 1 ? 'border-b border-tracy-border/30' : ''}`}>
+                  <span className="text-sm text-tracy-text tabular-nums">{formatDate(p.purchase_date)}</span>
+                  <span className="text-sm text-tracy-muted truncate flex items-center gap-2">
+                    {p.notes || '—'}
+                    {p.is_opening_stock && (
+                      <span className="text-[10px] font-bold text-tracy-gold border border-tracy-gold/30 rounded px-1.5 py-0.5 tracking-wide uppercase shrink-0">Estoque inicial</span>
+                    )}
+                  </span>
+                  <span className="text-sm text-tracy-muted text-right tabular-nums">{p.lot_count}</span>
+                  <span className="text-sm text-tracy-text text-right tabular-nums">{brl(Number(p.total_cost))}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── INSUMOS ── */}
+      {tab === 'insumos' && (
+        insumos.length === 0 ? (
           <div className="text-center py-16 border border-dashed border-tracy-border rounded-xl">
-            <p className="text-tracy-muted text-sm">Nenhum insumo (cor de material) cadastrado.</p>
+            <p className="text-tracy-muted text-sm">Nenhum insumo cadastrado. Cadastre via uma compra (aba Compras).</p>
           </div>
         ) : (
-          <div className="bg-tracy-surface border border-tracy-border rounded-xl overflow-hidden">
-            <div className="grid grid-cols-[1fr_140px_160px] px-5 py-2 border-b border-tracy-border/40">
-              <span className="text-[10px] font-semibold text-tracy-muted uppercase tracking-widest">Cor / material</span>
-              <span className="text-[10px] font-semibold text-tracy-muted uppercase tracking-widest text-right">Mín / Ideal</span>
-              <span className="text-[10px] font-semibold text-tracy-muted uppercase tracking-widest text-right">Quantidade</span>
-            </div>
-            {colors.map((c, i) => {
-              const level = stockLevel(c.quantity_in_stock, c.min_stock, c.ideal_stock)
-              return (
-                <div key={c.id} className={`grid grid-cols-[1fr_140px_160px] items-center px-5 py-3 ${i < colors.length - 1 ? 'border-b border-tracy-border/30' : ''}`}>
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-sm text-tracy-text truncate">{c.name}</span>
-                    <StockBadge level={level} />
+          <div className="space-y-6">
+            {insumoGroups.map(([brand, list]) => (
+              <div key={brand || '__none__'}>
+                <p className="text-[11px] font-semibold text-tracy-muted uppercase tracking-widest mb-2">{brand || 'Sem marca'}</p>
+                <div className="bg-tracy-surface border border-tracy-border rounded-xl overflow-hidden">
+                  <div className="grid grid-cols-[1fr_120px_120px_160px] px-5 py-2 border-b border-tracy-border/40">
+                    <span className="text-[10px] font-semibold text-tracy-muted uppercase tracking-widest">Insumo</span>
+                    <span className="text-[10px] font-semibold text-tracy-muted uppercase tracking-widest text-right">Mín / Ideal</span>
+                    <span className="text-[10px] font-semibold text-tracy-muted uppercase tracking-widest text-right">Estoque</span>
+                    <span />
                   </div>
-                  <LevelsInput colorId={c.id} min={c.min_stock} ideal={c.ideal_stock} />
-                  <StockInput initial={c.quantity_in_stock} onSave={(v) => setMaterialColorStockAction(c.id, v)} />
+                  {list.map((c, i) => {
+                    const level = stockLevel(c.quantity_in_stock, c.min_stock, c.ideal_stock)
+                    return (
+                      <div key={c.id} className={`grid grid-cols-[1fr_120px_120px_160px] items-center px-5 py-3 ${i < list.length - 1 ? 'border-b border-tracy-border/30' : ''}`}>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-sm text-tracy-text truncate">{c.name}</span>
+                          <StockBadge level={level} />
+                        </div>
+                        <span className="text-sm text-tracy-muted text-right tabular-nums">{c.min_stock ?? '—'} / {c.ideal_stock ?? '—'}</span>
+                        <span className="text-sm text-tracy-text text-right tabular-nums">{c.quantity_in_stock} <span className="text-tracy-muted text-xs">{c.consumption_unit}</span></span>
+                        <div className="flex items-center justify-end gap-1">
+                          <button onClick={() => setEditingInsumo(c)} className="text-xs text-tracy-muted hover:text-tracy-text px-2 py-1 rounded hover:bg-tracy-bg transition-colors">Editar</button>
+                          <button onClick={() => setCorrectingInsumo(c)} className="text-xs text-tracy-muted hover:text-tracy-text px-2 py-1 rounded hover:bg-tracy-bg transition-colors" title="Correção de estoque (perda/quebra)">Corrigir</button>
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
-              )
-            })}
-            <p className="px-5 py-3 text-[11px] text-tracy-muted border-t border-tracy-border/40">
-              Quantidade ajustada automaticamente conforme uso em comandas. Edite manualmente para correções de inventário.
+              </div>
+            ))}
+            <p className="text-[11px] text-tracy-muted">
+              Estoque sobe via Compras (lote + custo). A baixa manual (Corrigir) sai do lote mais antigo (FIFO) e só remove.
             </p>
           </div>
         )
-      ) : products.length === 0 ? (
-        <div className="text-center py-16 border border-dashed border-tracy-border rounded-xl">
-          <p className="text-tracy-muted text-sm">Nenhum produto ativo. Cadastre em Catálogo → Produtos.</p>
-        </div>
-      ) : (
-        <div className="bg-tracy-surface border border-tracy-border rounded-xl overflow-hidden">
-          <div className="grid grid-cols-[1fr_70px_70px_160px] px-5 py-2 border-b border-tracy-border/40">
-            <span className="text-[10px] font-semibold text-tracy-muted uppercase tracking-widest">Produto</span>
-            <span className="text-[10px] font-semibold text-tracy-muted uppercase tracking-widest text-right">Mín</span>
-            <span className="text-[10px] font-semibold text-tracy-muted uppercase tracking-widest text-right">Ideal</span>
-            <span className="text-[10px] font-semibold text-tracy-muted uppercase tracking-widest text-right">Quantidade</span>
-          </div>
-          {products.map((p, i) => {
-            const level = stockLevel(p.quantity_in_stock, p.min_stock, p.ideal_stock)
-            return (
-              <div key={p.id} className={`grid grid-cols-[1fr_70px_70px_160px] items-center px-5 py-3 ${i < products.length - 1 ? 'border-b border-tracy-border/30' : ''}`}>
-                <div className="min-w-0 flex items-center gap-2">
-                  <span className="text-sm text-tracy-text truncate">{p.name}</span>
-                  <StockBadge level={level} />
-                </div>
-                <span className="text-sm text-tracy-muted text-right tabular-nums">{p.min_stock ?? '—'}</span>
-                <span className="text-sm text-tracy-muted text-right tabular-nums">{p.ideal_stock ?? '—'}</span>
-                <StockInput initial={p.quantity_in_stock} onSave={(v) => setProductStockAction(p.id, v)} />
-              </div>
-            )
-          })}
-        </div>
+      )}
+
+      {/* ── PRODUTOS (catálogo completo) ── */}
+      {tab === 'produtos' && (
+        <ProductsTab products={products} canManage showCommissionField={showCommissionField} enableCorrection />
+      )}
+
+      {/* Modais */}
+      {purchaseModal && (
+        <PurchaseModal
+          mode={purchaseModal}
+          items={purchaseItems}
+          onClose={() => setPurchaseModal(null)}
+          onSaved={() => setPurchaseModal(null)}
+        />
+      )}
+      {editingInsumo && (
+        <InsumoFormModal insumo={editingInsumo} onClose={() => setEditingInsumo(null)} onSaved={() => setEditingInsumo(null)} />
+      )}
+      {correctingInsumo && (
+        <StockCorrectionModal
+          itemType="insumo"
+          itemId={correctingInsumo.id}
+          itemName={correctingInsumo.name}
+          unit={correctingInsumo.consumption_unit}
+          currentStock={correctingInsumo.quantity_in_stock}
+          onClose={() => setCorrectingInsumo(null)}
+          onSaved={() => setCorrectingInsumo(null)}
+        />
       )}
     </div>
   )

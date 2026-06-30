@@ -133,29 +133,38 @@ export async function addProductToComandaAction(
 
   const commission_percent_snapshot = await resolveCommissionSnapshot(salonId, sold.user_id, product)
 
-  // Baixa de estoque ANTES de inserir a linha (RPC atômico, nunca negativo). Recusa se insuficiente.
-  const { data: ok } = await admin.rpc('adjust_product_stock', {
-    p_product_id: product.id,
-    p_salon_id: salonId,
-    p_delta: -quantity,
-  })
-  if (!ok) return { error: 'estoque_insuficiente' }
-
-  // Insere a linha pelo client autenticado (RLS é o gate). Em falha, devolve o estoque (compensação).
+  // Insere a linha (RLS, client normal) — precisa do id para amarrar o consumo de lote FIFO.
   const supabase = await createClient()
-  const { error } = await supabase.from('appointment_products').insert({
-    appointment_id: appointmentId,
-    salon_id: salonId,
-    product_id: product.id,
-    quantity,
-    unit_price,
-    sold_by_user_id: sold.user_id,
-    sold_by_label: sold.label,
-    commission_percent_snapshot,
+  const { data: line, error } = await supabase
+    .from('appointment_products')
+    .insert({
+      appointment_id: appointmentId,
+      salon_id: salonId,
+      product_id: product.id,
+      quantity,
+      unit_price,
+      sold_by_user_id: sold.user_id,
+      sold_by_label: sold.label,
+      commission_percent_snapshot,
+    })
+    .select('id')
+    .single()
+  if (error || !line) return { error: error?.message ?? 'Erro ao adicionar produto.' }
+
+  // Baixa FIFO amarrada à linha (lote mais antigo primeiro). Em falta, desfaz a linha.
+  const { data: r } = await admin.rpc('consume_inventory_fifo', {
+    p_item_type: 'produto',
+    p_item_id: product.id,
+    p_salon_id: salonId,
+    p_quantity: quantity,
+    p_source_type: 'appointment_product',
+    p_source_id: line.id,
   })
-  if (error) {
-    await admin.rpc('adjust_product_stock', { p_product_id: product.id, p_salon_id: salonId, p_delta: quantity })
-    return { error: error.message }
+  if (!r?.success) {
+    await admin.from('appointment_products').delete().eq('id', line.id)
+    return {
+      error: r?.error === 'estoque_insuficiente' ? `Estoque insuficiente. Disponível: ${r.available ?? 0}` : 'estoque_insuficiente',
+    }
   }
 
   revalidatePath(`/admin/agenda/${appointmentId}`)
@@ -191,14 +200,21 @@ export async function updateComandaProductQuantityAction(
   if (!line || !line.active) return { error: 'Linha de produto não encontrada.' }
 
   const admin = createAdminClient()
-  const delta = qty - line.quantity // >0 consome mais, <0 devolve
-  if (delta !== 0) {
-    const { data: ok } = await admin.rpc('adjust_product_stock', {
-      p_product_id: line.product_id,
-      p_salon_id: line.salon_id,
-      p_delta: -delta,
+  const oldQty = line.quantity
+  if (qty !== oldQty) {
+    // Devolve o consumo antigo e reconsome a nova quantidade (FIFO). Restaura o antigo se faltar.
+    await admin.rpc('return_inventory_fifo', { p_source_type: 'appointment_product', p_source_id: lineId, p_salon_id: line.salon_id })
+    const { data: r } = await admin.rpc('consume_inventory_fifo', {
+      p_item_type: 'produto', p_item_id: line.product_id, p_salon_id: line.salon_id,
+      p_quantity: qty, p_source_type: 'appointment_product', p_source_id: lineId,
     })
-    if (!ok) return { error: 'estoque_insuficiente' }
+    if (!r?.success) {
+      await admin.rpc('consume_inventory_fifo', {
+        p_item_type: 'produto', p_item_id: line.product_id, p_salon_id: line.salon_id,
+        p_quantity: oldQty, p_source_type: 'appointment_product', p_source_id: lineId,
+      })
+      return { error: r?.error === 'estoque_insuficiente' ? `Estoque insuficiente. Disponível: ${r.available ?? 0}` : 'estoque_insuficiente' }
+    }
   }
 
   const supabase = await createClient()
@@ -207,8 +223,13 @@ export async function updateComandaProductQuantityAction(
     .update({ quantity: qty, updated_at: new Date().toISOString() })
     .eq('id', lineId)
   if (error) {
-    if (delta !== 0)
-      await admin.rpc('adjust_product_stock', { p_product_id: line.product_id, p_salon_id: line.salon_id, p_delta: delta })
+    if (qty !== oldQty) {
+      await admin.rpc('return_inventory_fifo', { p_source_type: 'appointment_product', p_source_id: lineId, p_salon_id: line.salon_id })
+      await admin.rpc('consume_inventory_fifo', {
+        p_item_type: 'produto', p_item_id: line.product_id, p_salon_id: line.salon_id,
+        p_quantity: oldQty, p_source_type: 'appointment_product', p_source_id: lineId,
+      })
+    }
     return { error: error.message }
   }
 
@@ -309,19 +330,19 @@ export async function removeComandaProductAction(
   if (!line || !line.active) return { error: 'Linha de produto não encontrada.' }
 
   const admin = createAdminClient()
+  // Devolve o consumo FIFO ao(s) lote(s) antes de inativar a linha.
+  await admin.rpc('return_inventory_fifo', {
+    p_source_type: 'appointment_product',
+    p_source_id: lineId,
+    p_salon_id: line.salon_id,
+  })
+
   const supabase = await createClient()
   const { error } = await supabase
     .from('appointment_products')
     .update({ active: false, updated_at: new Date().toISOString() })
     .eq('id', lineId)
   if (error) return { error: error.message }
-
-  // Devolve o estoque após o soft-delete da linha.
-  await admin.rpc('adjust_product_stock', {
-    p_product_id: line.product_id,
-    p_salon_id: line.salon_id,
-    p_delta: line.quantity,
-  })
 
   revalidatePath(`/admin/agenda/${appointmentId}`)
   revalidatePath('/admin/agenda')

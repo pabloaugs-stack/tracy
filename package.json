@@ -32,7 +32,8 @@
     "test:signal-card-fee": "tsx scripts/test-signal-card-fee.ts",
     "test:fee-passthrough": "tsx scripts/test-fee-passthrough.ts",
     "test:installment-options": "tsx scripts/test-installment-options.ts",
-    "test:financial-entries": "tsx scripts/test-financial-entries.ts"
+    "test:financial-entries": "tsx scripts/test-financial-entries.ts",
+    "test:inventory-lots": "tsx scripts/test-inventory-lots.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

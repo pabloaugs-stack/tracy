@@ -6,15 +6,16 @@ import type { MaterialColorRow, MaterialType } from '@/lib/types/database'
 
 // Seção de cor de material exibida JÁ NA CRIAÇÃO da comanda. Diferente de ComandaMaterialsSection
 // (modal), aqui não há appointment_id ainda: as escolhas ficam em estado local e são serializadas
-// no FormData (mat_count, mat_type_{i}, mat_color_id_{i}, mat_quantity_{i}). A baixa de estoque
+// no FormData (mat_count, mat_type_{i}, mat_color_id_{i}, mat_quantity_{i}). A baixa de estoque (FIFO)
 // acontece no servidor (insertAppointment), atomicamente, depois que a comanda é criada.
-// Não adicionar cor nenhuma = "cliente define no dia" (continua podendo adicionar depois no modal).
+// Não adicionar cor nenhuma = "cliente define no dia". Quantidade é em unidade de consumo (fracionária).
 
 interface MatLine {
   key: number
   type: MaterialType
   colorId: string
   colorName: string
+  colorUnit: string
   quantity: number
 }
 
@@ -27,6 +28,10 @@ const MATERIAL_LABELS: Record<MaterialType, string> = { jumbo: 'Jumbo', cachos: 
 const sectionHeaderCls = 'text-[10px] font-bold text-tracy-muted uppercase tracking-widest mb-3'
 const innerInputCls =
   'bg-tracy-bg border border-tracy-border rounded-lg px-2 py-1.5 text-tracy-text text-sm focus:outline-none focus:border-tracy-gold'
+
+function round3(n: number): number {
+  return Math.round(n * 1000) / 1000
+}
 
 export function ComandaMaterialsCreateSection({ colors }: Props) {
   const [lines, setLines] = useState<MatLine[]>([])
@@ -45,13 +50,15 @@ export function ComandaMaterialsCreateSection({ colors }: Props) {
   const [newColorName, setNewColorName] = useState('')
   const [colorPending, startColorTransition] = useTransition()
 
+  const selectedUnit = localColors.find((c) => c.id === newColorId)?.consumption_unit ?? ''
+
   function handleAdd() {
     if (!newColorId) { setError('Selecione uma cor.'); return }
-    const qty = parseInt(newQty, 10)
-    if (!Number.isInteger(qty) || qty < 1) { setError('Quantidade deve ser ao menos 1.'); return }
+    const qty = round3(parseFloat(newQty))
+    if (!Number.isFinite(qty) || qty <= 0) { setError('Quantidade deve ser maior que zero.'); return }
     const color = localColors.find((c) => c.id === newColorId)
     if (!color) { setError('Cor inválida.'); return }
-    setLines((prev) => [...prev, { key: lineKey, type: newType, colorId: color.id, colorName: color.name, quantity: qty }])
+    setLines((prev) => [...prev, { key: lineKey, type: newType, colorId: color.id, colorName: color.name, colorUnit: color.consumption_unit, quantity: qty }])
     setLineKey((k) => k + 1)
     setAdding(false)
     setNewType('jumbo')
@@ -64,8 +71,9 @@ export function ComandaMaterialsCreateSection({ colors }: Props) {
     setLines((prev) => prev.filter((l) => l.key !== key))
   }
 
-  function updateQty(key: number, delta: number) {
-    setLines((prev) => prev.map((l) => (l.key === key ? { ...l, quantity: Math.max(1, l.quantity + delta) } : l)))
+  function setQty(key: number, value: string) {
+    const q = round3(parseFloat(value))
+    setLines((prev) => prev.map((l) => (l.key === key ? { ...l, quantity: Number.isFinite(q) && q > 0 ? q : l.quantity } : l)))
   }
 
   function handleCreateColor() {
@@ -76,9 +84,12 @@ export function ComandaMaterialsCreateSection({ colors }: Props) {
     startColorTransition(async () => {
       const r = await createMaterialColorInlineAction(fd)
       if ('error' in r) { setError(r.error); return }
+      // Cor recém-criada herda os defaults do banco (gomo/pacote/conversão 1).
       const nc: MaterialColorRow = {
         id: r.id, name: r.name, salon_id: '', active: true,
-        quantity_in_stock: 0, ideal_stock: null, min_stock: null, created_at: '',
+        quantity_in_stock: 0, ideal_stock: null, min_stock: null,
+        brand: null, purchase_unit: 'pacote', consumption_unit: 'gomo', conversion_factor: 1,
+        created_at: '',
       }
       setLocalColors((prev) => [...prev, nc].sort((a, b) => a.name.localeCompare(b.name)))
       setNewColorId(r.id)
@@ -110,23 +121,14 @@ export function ComandaMaterialsCreateSection({ colors }: Props) {
                 {MATERIAL_LABELS[line.type]}
               </span>
               <span className="text-sm text-tracy-text flex-1 min-w-0 truncate">{line.colorName}</span>
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => updateQty(line.key, -1)}
-                  disabled={line.quantity <= 1}
-                  className="w-6 h-6 rounded border border-tracy-border text-tracy-muted hover:text-tracy-text disabled:opacity-40"
-                >
-                  −
-                </button>
-                <span className="text-sm text-tracy-text tabular-nums w-7 text-center">{line.quantity}</span>
-                <button
-                  type="button"
-                  onClick={() => updateQty(line.key, 1)}
-                  className="w-6 h-6 rounded border border-tracy-border text-tracy-muted hover:text-tracy-text"
-                >
-                  +
-                </button>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="number" min="0" step="0.5"
+                  defaultValue={line.quantity}
+                  onChange={(e) => setQty(line.key, e.target.value)}
+                  className={`${innerInputCls} w-20 text-right tabular-nums`}
+                />
+                <span className="text-[11px] text-tracy-muted w-10">{line.colorUnit}</span>
               </div>
               <button
                 type="button"
@@ -167,7 +169,8 @@ export function ComandaMaterialsCreateSection({ colors }: Props) {
               <span className="text-xs text-tracy-muted flex-1">Nenhuma cor cadastrada</span>
             )}
             <label className="text-[11px] text-tracy-muted">Qtd</label>
-            <input type="number" min="1" step="1" value={newQty} onChange={(e) => setNewQty(e.target.value)} className={`${innerInputCls} w-16`} />
+            <input type="number" min="0" step="0.5" value={newQty} onChange={(e) => setNewQty(e.target.value)} className={`${innerInputCls} w-20`} />
+            {selectedUnit && <span className="text-[11px] text-tracy-muted">{selectedUnit}</span>}
           </div>
 
           {!showNewColor ? (
@@ -206,7 +209,7 @@ export function ComandaMaterialsCreateSection({ colors }: Props) {
         </div>
       )}
 
-      {/* Serialização para o FormData — consumido por insertAppointment (baixa de estoque atômica) */}
+      {/* Serialização para o FormData — consumido por insertAppointment (baixa de estoque FIFO atômica) */}
       <input type="hidden" name="mat_count" value={lines.length} />
       {lines.map((line, idx) => (
         <span key={`hidden-${line.key}`}>

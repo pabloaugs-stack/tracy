@@ -185,27 +185,29 @@ async function insertAppointment(
   // acontece após criar a comanda (precisa do appointment_id) — assim um erro de validação não deixa
   // comanda pela metade.
   const matCount = parseInt((formData.get('mat_count') as string | null) ?? '0', 10)
-  const materialsToApply: { color_id: string; type: MaterialType; quantity: number }[] = []
+  const materialsToApply: { color_id: string; type: MaterialType; quantity: number; consumption_unit: string }[] = []
   for (let i = 0; i < matCount; i++) {
     const colorId = (formData.get(`mat_color_id_${i}`) as string | null)?.trim()
     if (!colorId) continue // linha sem cor escolhida = define no dia; ignora
     const typeRaw = (formData.get(`mat_type_${i}`) as string | null)?.trim()
     if (typeRaw !== 'jumbo' && typeRaw !== 'cachos') return { error: 'Tipo de material inválido.' }
     const qtyRaw = (formData.get(`mat_quantity_${i}`) as string | null)?.trim()
-    const quantity = qtyRaw ? Math.trunc(parseFloat(qtyRaw)) : 0
-    if (!Number.isInteger(quantity) || quantity < 1) return { error: 'Quantidade de material deve ser ao menos 1.' }
-    materialsToApply.push({ color_id: colorId, type: typeRaw, quantity })
+    // Consumo em unidade de consumo agora é fracionário (ex.: 2.5 gomos).
+    const quantity = qtyRaw ? Math.round(parseFloat(qtyRaw) * 1000) / 1000 : 0
+    if (!Number.isFinite(quantity) || quantity <= 0) return { error: 'Quantidade de material deve ser maior que zero.' }
+    materialsToApply.push({ color_id: colorId, type: typeRaw, quantity, consumption_unit: '' })
   }
-  // Confere que toda cor referenciada pertence ao salão e está ativa.
+  // Confere que toda cor referenciada pertence ao salão e está ativa; captura a unidade de consumo.
   if (materialsToApply.length > 0) {
     const colorIds = [...new Set(materialsToApply.map((m) => m.color_id))]
     const { data: validColors } = await supabase
       .from('material_colors')
-      .select('id, active')
+      .select('id, active, consumption_unit')
       .eq('salon_id', profile.salon_id)
       .in('id', colorIds)
-    const okIds = new Set((validColors ?? []).filter((c) => c.active).map((c) => c.id))
-    if (colorIds.some((id) => !okIds.has(id))) return { error: 'Cor de material inválida ou inativa.' }
+    const okMap = new Map((validColors ?? []).filter((c) => c.active).map((c) => [c.id, c.consumption_unit as string]))
+    if (colorIds.some((id) => !okMap.has(id))) return { error: 'Cor de material inválida ou inativa.' }
+    for (const m of materialsToApply) m.consumption_unit = okMap.get(m.color_id) ?? ''
   }
 
   const { data: appointment, error: apptError } = await supabase
@@ -269,13 +271,13 @@ async function insertAppointment(
   // devolve o estoque já baixado e apaga a comanda recém-criada + filhos. Nada de comanda "pela metade".
   if (materialsToApply.length > 0) {
     const admin = createAdminClient()
-    const applied: { color_id: string; quantity: number }[] = []
+    const consumedSourceIds: string[] = [] // linhas já baixadas por FIFO (para devolver no rollback)
 
     // Rollback: a comanda acabou de nascer e está inválida → hard delete é seguro (sem histórico a
-    // preservar). Filhos antes do appointment por causa das FKs RESTRICT.
+    // preservar). Devolve os consumos FIFO já feitos; filhos antes do appointment (FKs RESTRICT).
     const rollbackCreation = async () => {
-      for (const m of applied) {
-        await admin.rpc('adjust_material_color_stock', { p_color_id: m.color_id, p_salon_id: profile.salon_id, p_delta: m.quantity })
+      for (const sid of consumedSourceIds) {
+        await admin.rpc('return_inventory_fifo', { p_source_type: 'appointment_material', p_source_id: sid, p_salon_id: profile.salon_id })
       }
       await admin.from('appointment_materials').delete().eq('appointment_id', appointment.id)
       await admin.from('appointment_payments').delete().eq('appointment_id', appointment.id)
@@ -284,27 +286,37 @@ async function insertAppointment(
     }
 
     for (const m of materialsToApply) {
-      const { data: ok } = await admin.rpc('adjust_material_color_stock', {
-        p_color_id: m.color_id,
+      // Insere a linha primeiro (precisa do id para amarrar o consumo de lote).
+      const { data: line, error: matErr } = await supabase
+        .from('appointment_materials')
+        .insert({
+          appointment_id: appointment.id,
+          type: m.type,
+          color_id: m.color_id,
+          quantity: m.quantity,
+          consumption_unit_snapshot: m.consumption_unit,
+        })
+        .select('id')
+        .single()
+      if (matErr || !line) {
+        await rollbackCreation()
+        return { error: matErr?.message ?? 'Erro ao adicionar material.' }
+      }
+
+      // Baixa FIFO amarrada à linha. Em falta de estoque, desfaz tudo.
+      const { data: r } = await admin.rpc('consume_inventory_fifo', {
+        p_item_type: 'insumo',
+        p_item_id: m.color_id,
         p_salon_id: profile.salon_id,
-        p_delta: -m.quantity,
+        p_quantity: m.quantity,
+        p_source_type: 'appointment_material',
+        p_source_id: line.id,
       })
-      if (!ok) {
+      if (!r?.success) {
         await rollbackCreation()
         return { error: 'estoque_insumo_insuficiente' }
       }
-      applied.push({ color_id: m.color_id, quantity: m.quantity })
-
-      const { error: matErr } = await supabase.from('appointment_materials').insert({
-        appointment_id: appointment.id,
-        type: m.type,
-        color_id: m.color_id,
-        quantity: m.quantity,
-      })
-      if (matErr) {
-        await rollbackCreation()
-        return { error: matErr.message }
-      }
+      consumedSourceIds.push(line.id)
     }
   }
 
@@ -402,16 +414,17 @@ export async function changeStatusAction(
   // Cancelar devolve TODOS os produtos ativos da comanda ao estoque e marca as linhas como inativas.
   // Não há devolução ao reabrir uma comanda concluída — só o cancelamento restitui o estoque.
   if (newStatus === 'cancelado') {
+    // Devolve via FIFO o consumo de cada linha de produto ativa (amarrado pelo id da linha).
     const { data: prodLines } = await admin
       .from('appointment_products')
-      .select('id, product_id, quantity')
+      .select('id')
       .eq('appointment_id', appointmentId)
       .eq('active', true)
     for (const line of prodLines ?? []) {
-      await admin.rpc('adjust_product_stock', {
-        p_product_id: line.product_id,
+      await admin.rpc('return_inventory_fifo', {
+        p_source_type: 'appointment_product',
+        p_source_id: line.id,
         p_salon_id: profile.salon_id,
-        p_delta: line.quantity,
       })
     }
     if ((prodLines ?? []).length > 0) {
@@ -422,17 +435,17 @@ export async function changeStatusAction(
         .eq('active', true)
     }
 
-    // Mesma devolução para materiais (insumos).
+    // Mesma devolução FIFO para materiais (insumos).
     const { data: matLines } = await admin
       .from('appointment_materials')
-      .select('id, color_id, quantity')
+      .select('id')
       .eq('appointment_id', appointmentId)
       .eq('active', true)
     for (const line of matLines ?? []) {
-      await admin.rpc('adjust_material_color_stock', {
-        p_color_id: line.color_id,
+      await admin.rpc('return_inventory_fifo', {
+        p_source_type: 'appointment_material',
+        p_source_id: line.id,
         p_salon_id: profile.salon_id,
-        p_delta: line.quantity,
       })
     }
     if ((matLines ?? []).length > 0) {

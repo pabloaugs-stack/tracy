@@ -7,8 +7,6 @@ import type { ProductUnit } from '@/lib/types/database'
 
 export type ProductActionState = { error: string } | { success: true } | undefined
 
-const VALID_UNITS: ProductUnit[] = ['un', 'ml', 'g']
-
 // Gate de gestão de catálogo de produtos: flag can_manage_catalog_products (ligada por padrão para
 // dono/gerente). Mesma regra da RLS de products.
 function canManageProducts(profile: { can_manage_catalog_products: boolean; role: string }): boolean {
@@ -23,7 +21,9 @@ function parseProductForm(formData: FormData):
       unit: ProductUnit
       sku: string | null
       description: string | null
-      quantity_in_stock: number
+      brand: string | null
+      purchase_unit: string | null
+      conversion_factor: number
       min_stock: number | null
       ideal_stock: number | null
       commission_percent: number | null
@@ -36,16 +36,19 @@ function parseProductForm(formData: FormData):
   const price = priceRaw ? parseFloat(priceRaw) : NaN
   if (!Number.isFinite(price) || price < 0) return { error: 'Preço deve ser maior ou igual a zero.' }
 
+  // unit = unidade de CONSUMO. Coluna text livre no banco; o tipo narrow é ProductUnit.
   const unit = ((formData.get('unit') as string | null)?.trim() || 'un') as ProductUnit
-  if (!VALID_UNITS.includes(unit)) return { error: 'Unidade de medida inválida.' }
 
   const sku = (formData.get('sku') as string | null)?.trim() || null
   const description = (formData.get('description') as string | null)?.trim() || null
+  const brand = (formData.get('brand') as string | null)?.trim() || null
+  const purchase_unit = (formData.get('purchase_unit') as string | null)?.trim() || null
 
-  const stockRaw = (formData.get('quantity_in_stock') as string | null)?.trim()
-  const quantity_in_stock = stockRaw ? parseInt(stockRaw, 10) : NaN
-  if (!Number.isInteger(quantity_in_stock) || quantity_in_stock < 0)
-    return { error: 'Estoque inicial deve ser um inteiro maior ou igual a zero.' }
+  const convRaw = (formData.get('conversion_factor') as string | null)?.trim()
+  let conversion_factor = convRaw ? parseFloat(convRaw) : 1
+  if (!Number.isFinite(conversion_factor) || conversion_factor <= 0) conversion_factor = 1
+
+  // Estoque NÃO é editável aqui (Sprint 7 / Fatia 2): só sobe via compra/lote, baixa via correção FIFO.
 
   const minStockRaw = (formData.get('min_stock') as string | null)?.trim()
   let min_stock: number | null = null
@@ -79,7 +82,7 @@ function parseProductForm(formData: FormData):
   const activeRaw = formData.get('active')
   const active = activeRaw === 'true' || activeRaw === '1' || activeRaw === 'on'
 
-  return { name, price, unit, sku, description, quantity_in_stock, min_stock, ideal_stock, commission_percent, active }
+  return { name, price, unit, sku, description, brand, purchase_unit, conversion_factor, min_stock, ideal_stock, commission_percent, active }
 }
 
 export async function createProductAction(
@@ -152,49 +155,9 @@ export async function toggleProductActiveAction(
   return { success: true }
 }
 
-// Ajuste manual de inventário (rota /admin/estoque). Override direto do estoque; não mexe em histórico.
-export async function setProductStockAction(
-  productId: string,
-  quantity: number
-): Promise<ProductActionState> {
-  const profile = await getSessionProfile()
-  if (profile.role !== 'dono' && profile.role !== 'gerente')
-    return { error: 'Sem permissão para ajustar estoque.' }
-  if (!Number.isInteger(quantity) || quantity < 0)
-    return { error: 'Quantidade deve ser um inteiro maior ou igual a zero.' }
-
-  const supabase = await createClient()
-  const { error } = await supabase
-    .from('products')
-    .update({ quantity_in_stock: quantity, updated_at: new Date().toISOString() })
-    .eq('id', productId)
-    .eq('salon_id', profile.salon_id)
-  if (error) return { error: error.message }
-  revalidatePath('/admin/estoque')
-  return { success: true }
-}
-
-// Ajuste manual do estoque de insumo (material_colors) na rota /admin/estoque.
-export async function setMaterialColorStockAction(
-  colorId: string,
-  quantity: number
-): Promise<ProductActionState> {
-  const profile = await getSessionProfile()
-  if (profile.role !== 'dono' && profile.role !== 'gerente')
-    return { error: 'Sem permissão para ajustar estoque.' }
-  if (!Number.isInteger(quantity) || quantity < 0)
-    return { error: 'Quantidade deve ser um inteiro maior ou igual a zero.' }
-
-  const supabase = await createClient()
-  const { error } = await supabase
-    .from('material_colors')
-    .update({ quantity_in_stock: quantity })
-    .eq('id', colorId)
-    .eq('salon_id', profile.salon_id)
-  if (error) return { error: error.message }
-  revalidatePath('/admin/estoque')
-  return { success: true }
-}
+// Nota: o aumento manual de estoque foi REMOVIDO no Sprint 7 / Fatia 2. Estoque só sobe via compra
+// (lote + custo). A baixa manual (correção: perda/quebra/validade/contagem) é FIFO via
+// adjustStockCorrectionAction em app/actions/inventory.ts. Aqui sobra só a edição de níveis.
 
 // Define mínimo/ideal de um insumo (alimenta os badges de alerta). null limpa o nível.
 export async function setMaterialColorLevelsAction(

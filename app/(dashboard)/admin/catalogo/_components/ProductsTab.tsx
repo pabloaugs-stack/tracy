@@ -7,11 +7,14 @@ import type { ProductRow } from '@/lib/types/database'
 import { stockLevel } from '@/lib/stock'
 import { StockBadge } from '@/app/(dashboard)/_components/StockBadge'
 import { ProductFormModal } from './ProductFormModal'
+import { StockCorrectionModal } from '@/app/(dashboard)/admin/estoque/_components/StockCorrectionModal'
 
 interface Props {
   products: ProductRow[]
   canManage: boolean
   showCommissionField: boolean
+  // Quando true (aba Produtos do Estoque), habilita a correção negativa FIFO por produto.
+  enableCorrection?: boolean
 }
 
 const UNIT_LABELS: Record<string, string> = { un: 'un', ml: 'ml', g: 'g' }
@@ -20,11 +23,12 @@ function formatBRL(value: number) {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 }
 
-export function ProductsTab({ products, canManage, showCommissionField }: Props) {
+export function ProductsTab({ products, canManage, showCommissionField, enableCorrection }: Props) {
   const router = useRouter()
   const [filter, setFilter] = useState<'ativos' | 'inativos'>('ativos')
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<ProductRow | null>(null)
+  const [correcting, setCorrecting] = useState<ProductRow | null>(null)
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
 
@@ -145,6 +149,15 @@ export function ProductsTab({ products, canManage, showCommissionField }: Props)
                       >
                         Editar
                       </button>
+                      {enableCorrection && p.active && (
+                        <button
+                          onClick={() => setCorrecting(p)}
+                          className="text-xs text-tracy-muted hover:text-tracy-text px-2 py-1 rounded hover:bg-tracy-bg transition-colors"
+                          title="Correção de estoque (perda/quebra)"
+                        >
+                          Corrigir
+                        </button>
+                      )}
                       <button
                         onClick={() => handleToggle(p)}
                         disabled={pending}
@@ -170,6 +183,18 @@ export function ProductsTab({ products, canManage, showCommissionField }: Props)
             setEditing(null)
           }}
           onSaved={handleSaved}
+        />
+      )}
+
+      {correcting && (
+        <StockCorrectionModal
+          itemType="produto"
+          itemId={correcting.id}
+          itemName={correcting.name}
+          unit={correcting.unit}
+          currentStock={correcting.quantity_in_stock}
+          onClose={() => setCorrecting(null)}
+          onSaved={() => setCorrecting(null)}
         />
       )}
     </div>

@@ -10,6 +10,7 @@ export type AppointmentPaymentType = 'sinal' | 'final'
 export type ProductUnit = 'un' | 'ml' | 'g'
 export type ProductCommissionMode = 'por_profissional' | 'por_produto'
 export type CardBrand = 'visa' | 'mastercard' | 'elo' | 'amex' | 'outro'
+export type InventoryItemType = 'insumo' | 'produto'
 export type FinancialEntryType = 'entrada' | 'saida'
 export type FinancialEntryKind = 'aporte' | 'despesa' | 'retirada'
 export type FinancialExpenseCategory =
@@ -249,6 +250,11 @@ export type MaterialColorRow = {
   quantity_in_stock: number
   ideal_stock: number | null
   min_stock: number | null
+  // Sprint 7 / Fatia 2 — unidades de compra/consumo + marca
+  brand: string | null
+  purchase_unit: string
+  consumption_unit: string
+  conversion_factor: number
   created_at: string
 }
 export type MaterialColorInsert = {
@@ -259,6 +265,10 @@ export type MaterialColorInsert = {
   quantity_in_stock?: number
   ideal_stock?: number | null
   min_stock?: number | null
+  brand?: string | null
+  purchase_unit?: string
+  consumption_unit?: string
+  conversion_factor?: number
   created_at?: string
 }
 export type MaterialColorUpdate = Partial<Omit<MaterialColorInsert, 'id'>>
@@ -276,6 +286,11 @@ export type ProductRow = {
   min_stock: number | null
   ideal_stock: number | null
   commission_percent: number | null
+  // Sprint 7 / Fatia 2 — marca + unidade de compra/conversão.
+  // unit (existente) = unidade de CONSUMO; purchase_unit null = sem conversão (compra = consumo).
+  brand: string | null
+  purchase_unit: string | null
+  conversion_factor: number
   active: boolean
   created_at: string
   updated_at: string
@@ -292,6 +307,9 @@ export type ProductInsert = {
   min_stock?: number | null
   ideal_stock?: number | null
   commission_percent?: number | null
+  brand?: string | null
+  purchase_unit?: string | null
+  conversion_factor?: number
   active?: boolean
   created_at?: string
   updated_at?: string
@@ -338,6 +356,7 @@ export type AppointmentMaterialRow = {
   type: MaterialType
   color_id: string
   quantity: number
+  consumption_unit_snapshot: string | null
   active: boolean
   created_at: string
 }
@@ -347,6 +366,7 @@ export type AppointmentMaterialInsert = {
   type: MaterialType
   color_id: string
   quantity?: number
+  consumption_unit_snapshot?: string | null
   active?: boolean
   created_at?: string
 }
@@ -565,6 +585,97 @@ export type FinancialEntryInsert = {
 }
 export type FinancialEntryUpdate = Partial<Omit<FinancialEntryInsert, 'id'>>
 
+// inventory_purchases (Sprint 7 / Fatia 2 — nota de compra)
+export type InventoryPurchaseRow = {
+  id: string
+  salon_id: string
+  purchase_date: string
+  notes: string | null
+  total_cost: number
+  created_by: string | null
+  is_opening_stock: boolean
+  active: boolean
+  created_at: string
+  updated_at: string
+}
+export type InventoryPurchaseInsert = {
+  id?: string
+  salon_id: string
+  purchase_date?: string
+  notes?: string | null
+  total_cost?: number
+  created_by?: string | null
+  is_opening_stock?: boolean
+  active?: boolean
+  created_at?: string
+  updated_at?: string
+}
+export type InventoryPurchaseUpdate = Partial<Omit<InventoryPurchaseInsert, 'id'>>
+
+// inventory_lots (Sprint 7 / Fatia 2 — lote FIFO; item_id é polimórfico via item_type)
+export type InventoryLotRow = {
+  id: string
+  salon_id: string
+  item_type: InventoryItemType
+  item_id: string
+  purchase_id: string | null
+  quantity_purchased: number
+  quantity_total: number
+  quantity_remaining: number
+  unit_cost: number
+  total_cost: number
+  conversion_factor_snapshot: number
+  purchase_unit_snapshot: string
+  consumption_unit_snapshot: string
+  purchase_date: string
+  is_opening_stock: boolean
+  active: boolean
+  created_at: string
+  updated_at: string
+}
+export type InventoryLotInsert = {
+  id?: string
+  salon_id: string
+  item_type: InventoryItemType
+  item_id: string
+  purchase_id?: string | null
+  quantity_purchased: number
+  quantity_total: number
+  quantity_remaining: number
+  unit_cost?: number
+  total_cost?: number
+  conversion_factor_snapshot?: number
+  purchase_unit_snapshot: string
+  consumption_unit_snapshot: string
+  purchase_date: string
+  is_opening_stock?: boolean
+  active?: boolean
+  created_at?: string
+  updated_at?: string
+}
+export type InventoryLotUpdate = Partial<Omit<InventoryLotInsert, 'id'>>
+
+// inventory_lot_consumptions (Sprint 7 / Fatia 2 — consumo de lote, polimórfico via source_type)
+export type InventoryLotConsumptionRow = {
+  id: string
+  lot_id: string
+  source_type: 'appointment_material' | 'appointment_product'
+  source_id: string
+  quantity_consumed: number
+  unit_cost_snapshot: number
+  created_at: string
+}
+export type InventoryLotConsumptionInsert = {
+  id?: string
+  lot_id: string
+  source_type: 'appointment_material' | 'appointment_product'
+  source_id: string
+  quantity_consumed: number
+  unit_cost_snapshot?: number
+  created_at?: string
+}
+export type InventoryLotConsumptionUpdate = Partial<Omit<InventoryLotConsumptionInsert, 'id'>>
+
 // time_track_pauses
 export type TimeTrackPauseRow = {
   id: string
@@ -614,6 +725,9 @@ export type Database = {
       card_machine_brands: { Row: CardMachineBrandRow; Insert: CardMachineBrandInsert; Update: CardMachineBrandUpdate; Relationships: never[] }
       card_installment_fees: { Row: CardInstallmentFeeRow; Insert: CardInstallmentFeeInsert; Update: CardInstallmentFeeUpdate; Relationships: never[] }
       financial_entries: { Row: FinancialEntryRow; Insert: FinancialEntryInsert; Update: FinancialEntryUpdate; Relationships: never[] }
+      inventory_purchases: { Row: InventoryPurchaseRow; Insert: InventoryPurchaseInsert; Update: InventoryPurchaseUpdate; Relationships: never[] }
+      inventory_lots: { Row: InventoryLotRow; Insert: InventoryLotInsert; Update: InventoryLotUpdate; Relationships: never[] }
+      inventory_lot_consumptions: { Row: InventoryLotConsumptionRow; Insert: InventoryLotConsumptionInsert; Update: InventoryLotConsumptionUpdate; Relationships: never[] }
     }
     Views: {
       [_ in never]: never
@@ -627,6 +741,40 @@ export type Database = {
         Args: { p_color_id: string; p_salon_id: string; p_delta: number }
         Returns: boolean
       }
+      // Sprint 7 / Fatia 2 — FIFO. Retornam jsonb { success, error?, available?, ... }.
+      consume_inventory_fifo: {
+        Args: {
+          p_item_type: InventoryItemType
+          p_item_id: string
+          p_salon_id: string
+          p_quantity: number
+          p_source_type: 'appointment_material' | 'appointment_product'
+          p_source_id: string
+        }
+        Returns: { success: boolean; error?: string; available?: number }
+      }
+      return_inventory_fifo: {
+        Args: {
+          p_source_type: 'appointment_material' | 'appointment_product'
+          p_source_id: string
+          p_salon_id: string
+        }
+        Returns: { success: boolean; returned?: number }
+      }
+      create_inventory_lots_from_purchase: {
+        Args: { p_purchase_id: string; p_salon_id: string; p_lots: unknown }
+        Returns: { success: boolean; lots_created?: number }
+      }
+      adjust_stock_correction: {
+        Args: {
+          p_item_type: InventoryItemType
+          p_item_id: string
+          p_salon_id: string
+          p_quantity: number
+          p_reason: string
+        }
+        Returns: { success: boolean; error?: string; available?: number }
+      }
     }
     Enums: {
       user_role: UserRole
@@ -638,6 +786,7 @@ export type Database = {
       payment_method_kind: PaymentMethodKind
       appointment_payment_type: AppointmentPaymentType
       card_brand: CardBrand
+      inventory_item_type: InventoryItemType
       financial_entry_type: FinancialEntryType
       financial_entry_kind: FinancialEntryKind
       financial_expense_category: FinancialExpenseCategory

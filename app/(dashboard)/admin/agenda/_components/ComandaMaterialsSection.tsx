@@ -59,10 +59,12 @@ export function ComandaMaterialsSection({ appointmentId, lines, colors, canEdit,
     })
   }
 
+  const selectedUnit = localColors.find((c) => c.id === newColorId)?.consumption_unit ?? ''
+
   function handleAdd() {
     if (!newColorId) { setError('Selecione uma cor.'); return }
-    const qty = parseInt(newQty, 10)
-    if (!Number.isInteger(qty) || qty < 1) { setError('Quantidade deve ser ao menos 1.'); return }
+    const qty = Math.round(parseFloat(newQty) * 1000) / 1000
+    if (!Number.isFinite(qty) || qty <= 0) { setError('Quantidade deve ser maior que zero.'); return }
     run(async () => {
       const r = await addMaterialToComandaAction(appointmentId, { colorId: newColorId, type: newType, quantity: qty })
       if (!r?.error) {
@@ -84,7 +86,10 @@ export function ComandaMaterialsSection({ appointmentId, lines, colors, canEdit,
         setError(r.error)
         return
       }
-      const nc = { id: r.id, name: r.name, salon_id: '', active: true, quantity_in_stock: 0, ideal_stock: null, min_stock: null, created_at: '' }
+      const nc: MaterialColorRow = {
+        id: r.id, name: r.name, salon_id: '', active: true, quantity_in_stock: 0, ideal_stock: null, min_stock: null,
+        brand: null, purchase_unit: 'pacote', consumption_unit: 'gomo', conversion_factor: 1, created_at: '',
+      }
       setLocalColors((prev) => [...prev, nc].sort((a, b) => a.name.localeCompare(b.name)))
       setNewColorId(r.id)
       setShowNewColor(false)
@@ -113,24 +118,19 @@ export function ComandaMaterialsSection({ appointmentId, lines, colors, canEdit,
               </span>
               <span className="text-sm text-tracy-text flex-1 min-w-0 truncate">{line.color.name}</span>
 
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  disabled={!canEdit || pending || line.quantity <= 1}
-                  onClick={() => run(() => updateComandaMaterialQuantityAction(appointmentId, line.id, line.quantity - 1))}
-                  className="w-6 h-6 rounded border border-tracy-border text-tracy-muted hover:text-tracy-text disabled:opacity-40"
-                >
-                  −
-                </button>
-                <span className="text-sm text-tracy-text tabular-nums w-7 text-center">{line.quantity}</span>
-                <button
-                  type="button"
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="number" min="0" step="0.5"
                   disabled={!canEdit || pending}
-                  onClick={() => run(() => updateComandaMaterialQuantityAction(appointmentId, line.id, line.quantity + 1))}
-                  className="w-6 h-6 rounded border border-tracy-border text-tracy-muted hover:text-tracy-text disabled:opacity-40"
-                >
-                  +
-                </button>
+                  defaultValue={line.quantity}
+                  onBlur={(e) => {
+                    const q = Math.round(parseFloat(e.target.value) * 1000) / 1000
+                    if (!Number.isFinite(q) || q <= 0) { e.target.value = String(line.quantity); return }
+                    if (q !== line.quantity) run(() => updateComandaMaterialQuantityAction(appointmentId, line.id, q))
+                  }}
+                  className={`${innerInputCls} w-20 text-right tabular-nums disabled:opacity-50`}
+                />
+                <span className="text-[11px] text-tracy-muted w-10">{line.consumption_unit_snapshot ?? line.color.consumption_unit}</span>
               </div>
 
               {canEdit && (
@@ -177,7 +177,8 @@ export function ComandaMaterialsSection({ appointmentId, lines, colors, canEdit,
                   <span className="text-xs text-tracy-muted flex-1">Nenhuma cor cadastrada</span>
                 )}
                 <label className="text-[11px] text-tracy-muted">Qtd</label>
-                <input type="number" min="1" step="1" value={newQty} onChange={(e) => setNewQty(e.target.value)} className={`${innerInputCls} w-16`} />
+                <input type="number" min="0" step="0.5" value={newQty} onChange={(e) => setNewQty(e.target.value)} className={`${innerInputCls} w-20`} />
+                {selectedUnit && <span className="text-[11px] text-tracy-muted">{selectedUnit}</span>}
               </div>
 
               {!showNewColor ? (
