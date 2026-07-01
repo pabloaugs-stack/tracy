@@ -122,6 +122,29 @@ export async function updateCardFeePassthroughSetting(
   return { success: true }
 }
 
+// Ciclo padrão de comissão do salão (semanal/quinzenal/mensal/livre). Só pré-filtra a tela de
+// Comissões a pagar — não força periodicidade nem afeta o accrual.
+export async function updateCommissionCycleSetting(
+  prevState: SalonSettingsActionResult | undefined,
+  formData: FormData
+): Promise<SalonSettingsActionResult> {
+  const profile = await getSessionProfile()
+  if (!['dono', 'gerente'].includes(profile.role)) return { error: 'Sem permissão.' }
+
+  const raw = (formData.get('commission_cycle') as string | null)?.trim()
+  if (raw !== 'semanal' && raw !== 'quinzenal' && raw !== 'mensal' && raw !== 'livre')
+    return { error: 'Ciclo de comissão inválido.' }
+
+  const supabase = await createClient()
+  const { error } = await supabase
+    .from('salon_settings')
+    .update({ commission_cycle: raw })
+    .eq('salon_id', profile.salon_id)
+  if (error) return { error: error.message }
+  revalidatePath('/admin/configuracoes')
+  return { success: true }
+}
+
 // Toggle: permitir editar preço de produto direto na comanda.
 export async function updateProductPriceEditSetting(
   prevState: SalonSettingsActionResult | undefined,

@@ -119,6 +119,7 @@ export default async function AgendaAdminPage({
           canCreate: profile.can_create_appointments,
           canClose: profile.can_close_appointments,
           canManageClients: profile.can_manage_clients,
+          canEditCommission: profile.role === 'dono' || profile.role === 'gerente' || profile.can_edit_commission,
           discountLimitPercent: profile.discount_limit_percent,
         }}
       />

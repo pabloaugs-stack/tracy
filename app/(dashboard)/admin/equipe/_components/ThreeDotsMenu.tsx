@@ -20,7 +20,9 @@ interface Props {
   canManageCatalogServices: boolean
   canManageCatalogProducts: boolean
   canViewFinancial: boolean
+  canEditCommission: boolean
   discountLimitPercent: number | null
+  memberRole: UserRole
   // Contexto do utilizador
   canManage: boolean
   isSelf: boolean
@@ -41,7 +43,9 @@ export function ThreeDotsMenu({
   canManageCatalogServices,
   canManageCatalogProducts,
   canViewFinancial,
+  canEditCommission,
   discountLimitPercent,
+  memberRole,
   canManage,
   isSelf,
   currentUserRole,
@@ -211,6 +215,7 @@ export function ThreeDotsMenu({
         <PermissionsModal
           memberId={memberId}
           memberName={memberName}
+          memberRole={memberRole}
           canCreateAppointments={canCreateAppointments}
           canCloseAppointments={canCloseAppointments}
           canViewOtherAgendas={canViewOtherAgendas}
@@ -219,6 +224,7 @@ export function ThreeDotsMenu({
           canManageCatalogServices={canManageCatalogServices}
           canManageCatalogProducts={canManageCatalogProducts}
           canViewFinancial={canViewFinancial}
+          canEditCommission={canEditCommission}
           discountLimitPercent={discountLimitPercent}
           canManage={canManage}
           isSelf={isSelf}

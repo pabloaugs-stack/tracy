@@ -109,6 +109,7 @@ export function ComandaCreateModal(props: Props) {
             depositDefault={props.depositDefault}
             cardTree={props.cardTree}
             cardFeePassthrough={props.cardFeePassthrough}
+            canEditCommission={currentUser.canEditCommission}
             mode="create"
             initialData={initialData}
             onCancel={onClose}

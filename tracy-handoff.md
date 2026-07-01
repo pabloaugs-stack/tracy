@@ -1,6 +1,6 @@
 # Tracy — Handoff
 
-Documento de estado vivo do projeto. Lido no início de cada bloco de trabalho, junto com `CLAUDE.md` (constantes arquiteturais) e `TESTING.md` (credenciais de teste). Reflete até **Sprint 7 / Fatia 1 (Lançamentos) concluída e validada** + **BLOCO Fix (cor de material na criação) implementado e em produção, aguardando validação visual** (último trabalho fechado).
+Documento de estado vivo do projeto. Lido no início de cada bloco de trabalho, junto com `CLAUDE.md` (constantes arquiteturais) e `TESTING.md` (credenciais de teste). Reflete até **Sprint 7 / Fatia 3 (Comissão automática + Comissões a pagar) implementada** (`test:commission` 14/14, regressões verdes, type-check + build OK — aguardando validação visual do Pablo). Fatias 1 e 2 concluídas antes.
 
 ---
 
@@ -43,6 +43,7 @@ Scripts de teste (todos verdes na entrega do BLOCO 8.1.1):
 | `test:payment-flow` | índice parcial do `final`, isolamento de pagamento por trancista, trava de sinal, saldo/cálculo | 20/20 |
 | `test:permissions-status-settings` | fechar/reabrir por role, flags de permissão, comanda fechada trava status, limite de desconto | 22/22 |
 | `test:comanda-completa` | cliente/cor inline, role_in_appointment, desconto, total_override, materiais, isolamento de cores | 29/29 |
+| `test:commission` | resolução por tipo/papel, override gated, comissão de produto, has_divergence no refechamento, RLS de commission_entries, base com/sem desconto, registrar pagamento | 14/14 |
 | `test:comanda-fixes`, `test:agenda-refinada`, `test:active-inactive`, `test:can-create-appointments`, `test:permissions-deposit` | regressões de blocos anteriores | — |
 
 ---
@@ -247,20 +248,38 @@ Coberto por `test:inventory-lots` (25 checks / 10 cenários, 25/25) + regressõe
 
 **Preparado para fornecedores (pós-MVP):** `inventory_lots` já pode receber origem opcional sem UI agora — não construído.
 
-**Próxima fatia:** Fatia 3 (Comissão automática + Comissões a pagar), que depende do custo por lote existir.
+---
+
+## BLOCO Sprint 7 / Fatia 3 — Comissão automática + Comissões a pagar (implementado, aguardando validação visual do Pablo)
+Coberto por `test:commission` (14/14) + regressões verdes (`test:close-as-allocated` 13/13, `test:payment-split` 20/20, `test:financial-entries` 34/34). `type-check` limpo, `next build` OK.
+
+**Modelo (migration `sprint7_fatia3_commission`):**
+- **`users`** estendida: `commission_type` (`nao_comissiona|categoria|simples|avancado`, default `categoria` — não quebra o legado), `commission_simple_percent`, `commission_solo_percent`, `commission_with_aux_percent`, `commission_as_aux_percent` (numeric nullable), `can_edit_commission` (bool default false — gate do override).
+- **`appointments.discount_affects_commission`** (bool default false — referência histórica de qual base foi usada).
+- **`commission_entries`** (accrual por profissional/comanda): service/product/total_commission, `commission_percent_used`, `role_resolved` (`sozinha|com_auxiliar|como_auxiliar`), `override_used`, `discount_applied`, `status` (`pendente|pago`), `has_divergence`, `commission_payment_id` (FK SET NULL), `resolved_at`, `active`. Índice único `(appointment_id, professional_id) WHERE active`. FKs para appointments/users/salons RESTRICT.
+- **`commission_payments`** (pagamento que agrupa N entradas de UMA profissional): paid_at, total_amount, nf_emitida, nf_number, notes, created_by.
+- **`salon_settings.commission_cycle`** (`semanal|quinzenal|mensal|livre`, default `livre`).
+- **RLS:** `commission_entries` SELECT = financeiro OU `professional_id = auth.uid()`; INSERT = só salão (para o accrual rodar sob qualquer usuário); UPDATE = financeiro. `commission_payments` SELECT/INSERT = financeiro. Sem DELETE.
+
+**Lógica pura (`lib/commission/resolve.ts` → `resolveCommissionPercent`):** papel real × tipo de comissão, com override gated. Testável sem banco. `isSolo` = trancista é a única profissional (calculado no Server Action; a redação "outra trancista" das decisões travadas era ambígua — a implementação segue os cenários de teste).
+
+**Accrual (`app/actions/commission.ts` → `resolveAndSaveCommissions`):** chamada DENTRO de `closeAppointmentAction` (helper `accrueCommissions`), via admin client. Base de serviço = `total_price` (OFF) ou `computeFinalTotal` sem produtos (ON, quando há desconto). Produto = `commission_percent_snapshot` × subtotal onde `sold_by_user_id` = a profissional (só com `product_commission_enabled`). UPSERT pelo índice único; se a entrada já era `pago` (comanda reaberta/refechada), atualiza o valor e marca `has_divergence=true`. **Falha não reverte o fechamento.** Reabrir NÃO apaga entries.
+
+**Comissões a pagar (`app/actions/commission.ts` → `registerCommissionPaymentAction`, gate `canViewFinancial`):** valida entradas (salão+profissional, pendentes, ativas), cria `commission_payment` e marca `status='pago'` + `commission_payment_id` + `resolved_at`. Queries em `lib/queries/commission.ts` (`listCommissionEntries`, `listPendingCommissionsByProfessional`, `getCommissionSummary`, `listCommissionPayments`).
+
+**UI:** toggle "Aplicar desconto à base de comissão" no `PaymentSplitModal` (só quando há desconto; default OFF; serializa o 3º arg de `closeAppointmentAction`). Bloco "Comissão" no `MembroForm` (tipo + percentuais + comissão de produto). Override gated no `ComandaForm` (input visível só p/ quem tem gate; oculto preserva o valor). `can_edit_commission` no `PermissionsModal` (papéis ≠ dono/gerente). Aba **Comissões a pagar** ativa em `/admin/financeiro/comissoes` (`CommissionTab` + `CommissionPaymentModal`): filtro profissional/status, agrupado por profissional, seleção livre, badges "Valor alterado"/"Desconto aplicado"/"Override". Select de ciclo em Configurações (`CommissionCycleSection`).
+
+**Próxima fatia:** Fatia 4 (Caixa — extrato com saldo acumulado, só leitura sobre 1+2+3).
 
 ---
 
 ## ✅ Concluído
-Sprint 1 (Fundação) · Sprint 2 (Auth/permissões) · Sprint 3 (Catálogo + templates AUG) · Sprint 4 Fatias 1–2 (clientes + comanda + profissionais) e Fatia 3 (status + busca) · BLOCO 7 (pagamento) · BLOCO 8 (agenda grid) · BLOCO 8.1 (dona solo + refinos) · BLOCO 8.1.1 (fixes) · BLOCO 9 (produtos + estoque) · BLOCO 10 (estoque 2 níveis + baixa de insumo + Relatórios MVP — **validado visualmente pelo Pablo**, 8/8 itens do checklist) · BLOCO 11 (fix subheader agenda + Dashboard de métricas + cadastro da árvore de cartão — **validado visualmente pelo Pablo**) · BLOCO Pagamento dividido (N formas no fechamento + consumo da árvore de cartão; sinal de crédito usa a árvore; "à vista" = 1x; repasse de taxa ao cliente opcional — **validado visualmente pelo Pablo**) · **Sprint 7 / Fatia 1 — Lançamentos financeiros** (entradas/saídas, recorrência preguiçosa, gate `can_view_financial`, dashboard de vencimentos, projeção somente-leitura, despesas fixas ativas — **validado visualmente pelo Pablo**, `test:financial-entries` 34/34).
+Sprint 1 (Fundação) · Sprint 2 (Auth/permissões) · Sprint 3 (Catálogo + templates AUG) · Sprint 4 Fatias 1–2 (clientes + comanda + profissionais) e Fatia 3 (status + busca) · BLOCO 7 (pagamento) · BLOCO 8 (agenda grid) · BLOCO 8.1 (dona solo + refinos) · BLOCO 8.1.1 (fixes) · BLOCO 9 (produtos + estoque) · BLOCO 10 (estoque 2 níveis + baixa de insumo + Relatórios MVP — **validado visualmente pelo Pablo**, 8/8 itens do checklist) · BLOCO 11 (fix subheader agenda + Dashboard de métricas + cadastro da árvore de cartão — **validado visualmente pelo Pablo**) · BLOCO Pagamento dividido (N formas no fechamento + consumo da árvore de cartão; sinal de crédito usa a árvore; "à vista" = 1x; repasse de taxa ao cliente opcional — **validado visualmente pelo Pablo**) · **Sprint 7 / Fatia 1 — Lançamentos financeiros** (entradas/saídas, recorrência preguiçosa, gate `can_view_financial`, dashboard de vencimentos, projeção somente-leitura, despesas fixas ativas — **validado visualmente pelo Pablo**, `test:financial-entries` 34/34) · **Sprint 7 / Fatia 2 — Estoque por lote (FIFO)** (`test:inventory-lots` 25/25).
 - **Pausa de infra (GitHub + Vercel) — CONCLUÍDA.** O repo está conectado (`origin = github.com/pabloaugs-stack/tracy`, branch `main`, deploy automático no Vercel). Sessões novas: o ambiente pode reportar "não é repositório git" no header inicial — **confirmar com `git rev-parse --is-inside-work-tree` antes de assumir**; nesta sessão estava OK.
 
-## ⏸️ Pausa planejada no Sprint 7 — RESOLVIDA
-A pausa de infra (GitHub + Vercel) entre Fatia 1 e Fatia 2 **já aconteceu**: o repo está conectado e fazendo deploy automático. A **Fatia 2 foi implementada** (ver bloco acima). Próximo: validação visual do Pablo e depois Fatia 3.
-
 ## ⚠️ Em andamento
-- **BLOCO Sprint 7 / Fatia 2 — Estoque por lote (FIFO):** implementado, `test:inventory-lots` 25/25, regressões verdes, `type-check` limpo, `next build` OK. Commitado e enviado ao `main` (deploy de produção no Vercel). **Aguardando validação visual do Pablo**: registrar compra (gera lote+custo) → estoque sobe; consumo na comanda baixa FIFO do lote mais antigo; correção negativa; banner de estoque inicial; aba Produtos no Estoque; Catálogo sem Produtos. Depois disso, seguir para a Fatia 3.
-- **BLOCO Fix — Cor de material na criação da comanda:** implementado e validado pelo fluxo (a Fatia 2 manteve o comportamento, trocando a baixa por FIFO). Commit `a595928` no `main`.
+- **BLOCO Sprint 7 / Fatia 3 — Comissão automática + Comissões a pagar:** implementado, `test:commission` 14/14, regressões verdes, `type-check` limpo, `next build` OK. **Aguardando validação visual do Pablo**: bloco Comissão na Equipe (tipo + percentuais + comissão de produto + `can_edit_commission`); fechar comanda gera pendências por profissional; toggle de desconto na base quando há desconto; aba Comissões a pagar (filtros, seleção livre, registrar pagamento, badges de divergência/desconto/override); ciclo em Configurações. Depois disso, seguir para a Fatia 4 (Caixa).
+- **BLOCO Sprint 7 / Fatia 2 — Estoque por lote (FIFO):** implementado, `test:inventory-lots` 25/25, no `main`. **Aguardando validação visual do Pablo**: registrar compra (gera lote+custo) → estoque sobe; consumo na comanda baixa FIFO do lote mais antigo; correção negativa; banner de estoque inicial; aba Produtos no Estoque; Catálogo sem Produtos.
 
 ## 🐞 Pendências abertas (não bloqueiam fila)
 - _(nenhuma — o bug do subheader da agenda foi resolvido no BLOCO 11, PARTE A.)_
@@ -285,7 +304,7 @@ Desenho fechado com o Pablo em sessão dedicada de chat (Project Chat). Cinco fa
 - Status pendente/pago, data de pagamento editável (igual ao padrão do sinal/final em appointment_payments).
 - Compra de estoque (insumo/produto) NÃO é um tipo de Lançamento desta fatia — é tratada na Fatia 2 (tem mecânica própria de lote/custo, ver abaixo).
 
-**Fatia 2 — Estoque por lote (FIFO) + custo + compra como entrada de lote (PRÓXIMA fatia, não implementar ainda):**
+**Fatia 2 — Estoque por lote (FIFO) + custo + compra como entrada de lote (concluída ✅):**
 - Decisão estrutural travada: custo por LOTE (FIFO), não custo médio ponderado. Cada compra de insumo/produto vira um lote (quantidade + custo unitário + data). Lotes coexistem com custos diferentes.
 - Entrada de estoque (aumentar quantidade) SEMPRE é uma compra com lote+custo+saída de caixa — é o único jeito de subir estoque. O ajuste manual hoje existente em `/admin/estoque` deixa de poder aumentar estoque; sobrevive só como baixa/correção (perda, quebra, validade, contagem), descontando de um lote existente pelo custo daquele lote.
 - Compra de estoque NÃO é despesa no lucro — é troca de caixa por ativo (estoque). Só entra no lucro quando consumida (vira COGS no momento do consumo).
@@ -294,7 +313,7 @@ Desenho fechado com o Pablo em sessão dedicada de chat (Project Chat). Cinco fa
 - Preparar terreno (schema apenas, sem construir fluxo) para Fornecedores pós-MVP: lote deve poder referenciar opcionalmente um fornecedor/origem, sem isso ser obrigatório ou ter UI própria agora.
 - "Quanto já consumi": view/relatório de Σ(quantidade × custo do lote consumido) por insumo/produto no período, mais estoque restante valorizado.
 
-**Fatia 3 — Comissão automática + Comissões a pagar (depende da 2):**
+**Fatia 3 — Comissão automática + Comissões a pagar (concluída ✅ — ver seção do bloco acima):**
 - Comissão do profissional deixa de ser só a do serviço/categoria. No cadastro/edição do profissional (Equipe), novo bloco "Comissão" com um seletor "Tipo de comissão": Não comissiona / Usar comissão da categoria de serviço (default, comportamento atual preservado) / Comissão simples (1 valor) / Comissão avançada (3 valores: Sozinho, Com auxiliar, Como auxiliar).
 - No fechamento da comanda, para cada profissional alocada, o sistema resolve automaticamente o valor olhando o papel dela NAQUELA comanda cruzado com o tipo de comissão configurado nela — sem digitação manual por comanda.
 - Comissão de produto continua campo separado (já existe `product_commission_percent` em users) — vira o "Comissão Padrão" de produtos dentro do mesmo bloco.

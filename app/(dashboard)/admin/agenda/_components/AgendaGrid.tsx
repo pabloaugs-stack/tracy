@@ -27,6 +27,7 @@ export interface CurrentUser {
   canCreate: boolean
   canClose: boolean
   canManageClients: boolean
+  canEditCommission: boolean
   discountLimitPercent: number | null
 }
 

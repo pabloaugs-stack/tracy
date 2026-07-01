@@ -5,7 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getSessionProfile } from '@/lib/auth/session'
-import type { UserRole } from '@/lib/types/database'
+import type { UserRole, CommissionType } from '@/lib/types/database'
 
 export type TeamActionState = { error: string } | undefined
 export type ToggleActionResult = { success: true } | { error: string }
@@ -19,7 +19,61 @@ type PermissionDefaults = {
   can_manage_catalog_products: boolean
   can_view_other_agendas: boolean
   can_view_other_clients: boolean
+  can_edit_commission: boolean
   discount_limit_percent: number | null
+}
+
+// Campos de comissão do perfil (Sprint 7 / Fatia 3). Parse + validação a partir do FormData da Equipe.
+type CommissionFields = {
+  commission_type: CommissionType
+  commission_simple_percent: number | null
+  commission_solo_percent: number | null
+  commission_with_aux_percent: number | null
+  commission_as_aux_percent: number | null
+  product_commission_percent: number | null
+}
+
+function parsePercent(formData: FormData, key: string): number | null {
+  const raw = (formData.get(key) as string | null)?.trim()
+  if (!raw) return null
+  const n = parseFloat(raw.replace(',', '.'))
+  return Number.isFinite(n) ? n : null
+}
+
+function parseCommissionFields(formData: FormData): { error: string } | { fields: CommissionFields } {
+  const typeRaw = (formData.get('commission_type') as string | null)?.trim() ?? 'categoria'
+  const commission_type = (['nao_comissiona', 'categoria', 'simples', 'avancado'].includes(typeRaw)
+    ? typeRaw
+    : 'categoria') as CommissionType
+
+  const simple = parsePercent(formData, 'commission_simple_percent')
+  const solo = parsePercent(formData, 'commission_solo_percent')
+  const withAux = parsePercent(formData, 'commission_with_aux_percent')
+  const asAux = parsePercent(formData, 'commission_as_aux_percent')
+  const product = parsePercent(formData, 'product_commission_percent')
+
+  for (const v of [simple, solo, withAux, asAux, product]) {
+    if (v != null && (v < 0 || v > 100)) return { error: 'Percentual de comissão deve estar entre 0 e 100.' }
+  }
+  if (commission_type === 'simples' && !(simple != null && simple > 0)) {
+    return { error: 'Informe a comissão única (maior que zero).' }
+  }
+  if (commission_type === 'avancado') {
+    if (!(solo != null && solo > 0) || !(withAux != null && withAux > 0) || !(asAux != null && asAux > 0)) {
+      return { error: 'Informe os três percentuais da comissão por papel (maiores que zero).' }
+    }
+  }
+
+  return {
+    fields: {
+      commission_type,
+      commission_simple_percent: simple,
+      commission_solo_percent: solo,
+      commission_with_aux_percent: withAux,
+      commission_as_aux_percent: asAux,
+      product_commission_percent: product,
+    },
+  }
 }
 
 function getRolePermissionDefaults(role: UserRole): PermissionDefaults {
@@ -35,6 +89,8 @@ function getRolePermissionDefaults(role: UserRole): PermissionDefaults {
       can_manage_catalog_products: true,
       can_view_other_agendas: true,
       can_view_other_clients: true,
+      // dono/gerente sempre podem editar override por código; a flag nasce false.
+      can_edit_commission: false,
       discount_limit_percent: null,
     }
   }
@@ -48,6 +104,7 @@ function getRolePermissionDefaults(role: UserRole): PermissionDefaults {
       can_manage_catalog_products: false,
       can_view_other_agendas: true,
       can_view_other_clients: true,
+      can_edit_commission: false,
       discount_limit_percent: null,
     }
   }
@@ -61,6 +118,7 @@ function getRolePermissionDefaults(role: UserRole): PermissionDefaults {
     can_manage_catalog_products: false,
     can_view_other_agendas: false,
     can_view_other_clients: false,
+    can_edit_commission: false,
     discount_limit_percent: null,
   }
 }
@@ -155,8 +213,12 @@ export async function createTeamMemberAction(
     can_manage_catalog_products: readPermBool(formData, 'perm_can_manage_catalog_products', defaults.can_manage_catalog_products),
     can_view_other_agendas: readPermBool(formData, 'perm_can_view_other_agendas', defaults.can_view_other_agendas),
     can_view_other_clients: readPermBool(formData, 'perm_can_view_other_clients', defaults.can_view_other_clients),
+    can_edit_commission: readPermBool(formData, 'perm_can_edit_commission', defaults.can_edit_commission),
     discount_limit_percent: defaults.discount_limit_percent,
   }
+
+  const commissionParsed = parseCommissionFields(formData)
+  if ('error' in commissionParsed) return { error: commissionParsed.error }
 
   // Insere o perfil vinculado ao salão com o id do auth user criado
   const { error: insertError } = await admin.from('users').insert({
@@ -167,6 +229,7 @@ export async function createTeamMemberAction(
     phone,
     role: role as UserRole,
     ...perms,
+    ...commissionParsed.fields,
   })
 
   if (insertError) {
@@ -195,12 +258,15 @@ export async function updateTeamMemberAction(
   if (!email) return { error: 'Email é obrigatório.' }
   if (!role || !MANAGEABLE_ROLES.includes(role as UserRole)) return { error: 'Função inválida.' }
 
+  const commissionParsed = parseCommissionFields(formData)
+  if ('error' in commissionParsed) return { error: commissionParsed.error }
+
   const admin = createAdminClient()
 
   try {
     const { error } = await admin
       .from('users')
-      .update({ name, email, phone, role: role as UserRole })
+      .update({ name, email, phone, role: role as UserRole, ...commissionParsed.fields })
       .eq('id', memberId)
       .eq('salon_id', profile.salon_id)
 
@@ -224,6 +290,7 @@ type PermUpdate = {
   can_manage_catalog_products?: boolean
   can_view_other_agendas?: boolean
   can_view_other_clients?: boolean
+  can_edit_commission?: boolean
   discount_limit_percent?: number | null
 }
 
@@ -244,6 +311,7 @@ export async function updateTeamMemberPermissions(
     'can_manage_catalog_products',
     'can_view_other_agendas',
     'can_view_other_clients',
+    'can_edit_commission',
   ]
 
   const updates: PermUpdate = {}

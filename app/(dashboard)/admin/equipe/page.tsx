@@ -124,7 +124,9 @@ export default async function EquipePage({
                     canManageCatalogServices={member.can_manage_catalog_services}
                     canManageCatalogProducts={member.can_manage_catalog_products}
                     canViewFinancial={member.can_view_financial}
+                    canEditCommission={member.can_edit_commission}
                     discountLimitPercent={member.discount_limit_percent}
+                    memberRole={member.role}
                     canManage={canManage}
                     isSelf={member.id === profile.id}
                     currentUserRole={profile.role}

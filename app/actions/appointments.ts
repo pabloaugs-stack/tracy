@@ -11,6 +11,7 @@ import { getActiveAppointmentProducts, type AppointmentProductLine } from '@/lib
 import { getActiveAppointmentMaterials, type AppointmentMaterialLine } from '@/lib/queries/appointment-materials'
 import { getInstallmentFee } from '@/lib/queries/card_tree'
 import { round2, cardFeeAmount } from '@/lib/payments/card-fee'
+import { resolveAndSaveCommissions } from '@/app/actions/commission'
 import type { AppointmentStatus, RoleInAppointment, DiscountType, MaterialType, AppointmentPaymentInsert } from '@/lib/types/database'
 
 export type AppointmentActionState = { error: string } | undefined
@@ -659,7 +660,9 @@ export type PaymentLineInput = {
 //   A taxa NÃO é descontada do amount (cliente paga cheio; taxa é custo do salão).
 export async function closeAppointmentAction(
   appointmentId: string,
-  payments: PaymentLineInput[]
+  payments: PaymentLineInput[],
+  // Só relevante quando a comanda tem desconto; default false = comissão sobre o valor cheio do serviço.
+  discountAffectsCommission: boolean = false
 ): Promise<CloseActionResult> {
   const profile = await getSessionProfile()
   const supabase = await createClient()
@@ -718,7 +721,9 @@ export async function closeAppointmentAction(
 
   // Saldo zerado (sinal cobre tudo): fecha sem finais. Linhas enviadas são ignoradas.
   if (saldo <= 0) {
-    return finalizeClose(admin, appointmentId, profile.salon_id)
+    const r = await finalizeClose(admin, appointmentId, profile.salon_id)
+    if (!r.error) await accrueCommissions(admin, appointmentId, profile, discountAffectsCommission)
+    return r
   }
 
   // Há saldo: exige ao menos 1 linha e que a soma bata com o saldo (tolerância R$ 0,01).
@@ -788,7 +793,32 @@ export async function closeAppointmentAction(
   const { error: payError } = await supabase.from('appointment_payments').insert(rows)
   if (payError) return { error: payError.message }
 
-  return finalizeClose(admin, appointmentId, profile.salon_id)
+  const r = await finalizeClose(admin, appointmentId, profile.salon_id)
+  if (!r.error) await accrueCommissions(admin, appointmentId, profile, discountAffectsCommission)
+  return r
+}
+
+// Salva discount_affects_commission na comanda e dispara o accrual de comissão (Sprint 7 / Fatia 3).
+// Comissão é accrual: se a resolução falhar, LOGA mas NÃO reverte o fechamento financeiro.
+async function accrueCommissions(
+  admin: ReturnType<typeof createAdminClient>,
+  appointmentId: string,
+  profile: Awaited<ReturnType<typeof getSessionProfile>>,
+  discountAffectsCommission: boolean
+): Promise<void> {
+  try {
+    await admin
+      .from('appointments')
+      .update({ discount_affects_commission: discountAffectsCommission })
+      .eq('id', appointmentId)
+      .eq('salon_id', profile.salon_id)
+    await resolveAndSaveCommissions(appointmentId, profile.salon_id, discountAffectsCommission, {
+      role: profile.role,
+      can_edit_commission: profile.can_edit_commission,
+    })
+  } catch (e) {
+    console.error('resolveAndSaveCommissions falhou (fechamento mantido):', e)
+  }
 }
 
 // Avança status → concluido e seta closed_at via admin (a policy appointments_update_close é role-only;

@@ -6,7 +6,7 @@ type Tab = { key: string; label: string; href?: string; soon?: boolean }
 
 const TABS: Tab[] = [
   { key: 'lancamentos', label: 'Lançamentos', href: '/admin/financeiro' },
-  { key: 'comissoes', label: 'Comissões a pagar', soon: true },
+  { key: 'comissoes', label: 'Comissões a pagar', href: '/admin/financeiro/comissoes' },
   { key: 'caixa', label: 'Caixa', soon: true },
   { key: 'lucro', label: 'Lucro real', soon: true },
 ]

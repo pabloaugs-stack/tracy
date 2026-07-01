@@ -17,6 +17,11 @@ export type FinancialExpenseCategory =
   | 'aluguel' | 'salarios' | 'agua_luz' | 'manutencao' | 'marketing' | 'taxas_impostos' | 'outro'
 export type FinancialEntryStatus = 'pendente' | 'pago'
 export type FinancialRecurrence = 'nenhuma' | 'mensal' | 'quinzenal' | 'semanal' | 'anual'
+// Sprint 7 / Fatia 3 — comissão (text + CHECK no banco, não enums Postgres)
+export type CommissionType = 'nao_comissiona' | 'categoria' | 'simples' | 'avancado'
+export type CommissionRoleResolved = 'sozinha' | 'com_auxiliar' | 'como_auxiliar'
+export type CommissionEntryStatus = 'pendente' | 'pago'
+export type CommissionCycle = 'semanal' | 'quinzenal' | 'mensal' | 'livre'
 
 // users
 export type UserRow = {
@@ -38,6 +43,13 @@ export type UserRow = {
   can_view_other_clients: boolean
   discount_limit_percent: number | null
   product_commission_percent: number | null
+  // Sprint 7 / Fatia 3 — tipo de comissão + percentuais por papel + gate de override
+  commission_type: CommissionType
+  commission_simple_percent: number | null
+  commission_solo_percent: number | null
+  commission_with_aux_percent: number | null
+  commission_as_aux_percent: number | null
+  can_edit_commission: boolean
   created_at: string
   updated_at: string
 }
@@ -60,6 +72,12 @@ export type UserInsert = {
   can_view_other_clients?: boolean
   discount_limit_percent?: number | null
   product_commission_percent?: number | null
+  commission_type?: CommissionType
+  commission_simple_percent?: number | null
+  commission_solo_percent?: number | null
+  commission_with_aux_percent?: number | null
+  commission_as_aux_percent?: number | null
+  can_edit_commission?: boolean
   created_at?: string
   updated_at?: string
 }
@@ -188,6 +206,8 @@ export type AppointmentRow = {
   deposit_type: 'fixed' | 'percent' | null
   deposit_value: number | null
   closed_at: string | null
+  // Sprint 7 / Fatia 3 — se o desconto entra na base de comissão de serviço (referência histórica)
+  discount_affects_commission: boolean
   notes: string | null
   created_at: string
   updated_at: string
@@ -208,6 +228,7 @@ export type AppointmentInsert = {
   deposit_type?: 'fixed' | 'percent' | null
   deposit_value?: number | null
   closed_at?: string | null
+  discount_affects_commission?: boolean
   notes?: string | null
   created_at?: string
   updated_at?: string
@@ -224,6 +245,8 @@ export type SalonSettingsRow = {
   product_commission_mode: ProductCommissionMode | null
   allow_edit_product_price: boolean
   card_fee_passthrough_enabled: boolean
+  // Sprint 7 / Fatia 3 — ciclo padrão de comissão (só pré-filtra a tela de pendências)
+  commission_cycle: CommissionCycle
   created_at: string
   updated_at: string
 }
@@ -236,6 +259,7 @@ export type SalonSettingsInsert = {
   product_commission_mode?: ProductCommissionMode | null
   allow_edit_product_price?: boolean
   card_fee_passthrough_enabled?: boolean
+  commission_cycle?: CommissionCycle
   created_at?: string
   updated_at?: string
 }
@@ -676,6 +700,76 @@ export type InventoryLotConsumptionInsert = {
 }
 export type InventoryLotConsumptionUpdate = Partial<Omit<InventoryLotConsumptionInsert, 'id'>>
 
+// commission_entries (Sprint 7 / Fatia 3 — accrual de comissão por profissional/comanda)
+export type CommissionEntryRow = {
+  id: string
+  salon_id: string
+  appointment_id: string
+  professional_id: string
+  service_commission: number
+  product_commission: number
+  total_commission: number
+  commission_percent_used: number | null
+  role_resolved: CommissionRoleResolved | null
+  override_used: boolean
+  discount_applied: boolean
+  status: CommissionEntryStatus
+  has_divergence: boolean
+  commission_payment_id: string | null
+  resolved_at: string | null
+  active: boolean
+  created_at: string
+  updated_at: string
+}
+export type CommissionEntryInsert = {
+  id?: string
+  salon_id: string
+  appointment_id: string
+  professional_id: string
+  service_commission?: number
+  product_commission?: number
+  total_commission?: number
+  commission_percent_used?: number | null
+  role_resolved?: CommissionRoleResolved | null
+  override_used?: boolean
+  discount_applied?: boolean
+  status?: CommissionEntryStatus
+  has_divergence?: boolean
+  commission_payment_id?: string | null
+  resolved_at?: string | null
+  active?: boolean
+  created_at?: string
+  updated_at?: string
+}
+export type CommissionEntryUpdate = Partial<Omit<CommissionEntryInsert, 'id'>>
+
+// commission_payments (Sprint 7 / Fatia 3 — pagamento de comissão, agrupa N entries)
+export type CommissionPaymentRow = {
+  id: string
+  salon_id: string
+  professional_id: string
+  paid_at: string
+  total_amount: number
+  nf_emitida: boolean
+  nf_number: string | null
+  notes: string | null
+  created_by: string | null
+  created_at: string
+}
+export type CommissionPaymentInsert = {
+  id?: string
+  salon_id: string
+  professional_id: string
+  paid_at?: string
+  total_amount: number
+  nf_emitida?: boolean
+  nf_number?: string | null
+  notes?: string | null
+  created_by?: string | null
+  created_at?: string
+}
+export type CommissionPaymentUpdate = Partial<Omit<CommissionPaymentInsert, 'id'>>
+
 // time_track_pauses
 export type TimeTrackPauseRow = {
   id: string
@@ -728,6 +822,8 @@ export type Database = {
       inventory_purchases: { Row: InventoryPurchaseRow; Insert: InventoryPurchaseInsert; Update: InventoryPurchaseUpdate; Relationships: never[] }
       inventory_lots: { Row: InventoryLotRow; Insert: InventoryLotInsert; Update: InventoryLotUpdate; Relationships: never[] }
       inventory_lot_consumptions: { Row: InventoryLotConsumptionRow; Insert: InventoryLotConsumptionInsert; Update: InventoryLotConsumptionUpdate; Relationships: never[] }
+      commission_entries: { Row: CommissionEntryRow; Insert: CommissionEntryInsert; Update: CommissionEntryUpdate; Relationships: never[] }
+      commission_payments: { Row: CommissionPaymentRow; Insert: CommissionPaymentInsert; Update: CommissionPaymentUpdate; Relationships: never[] }
     }
     Views: {
       [_ in never]: never

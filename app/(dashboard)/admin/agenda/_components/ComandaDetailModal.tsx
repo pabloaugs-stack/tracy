@@ -192,6 +192,14 @@ export function ComandaDetailModal(props: Props) {
   const saldo = Math.max(0, finalTotal - totalSinais)
   const activeSinal = activeSinais[0] ?? null
 
+  // Base de comissão de serviço (Sprint 7 / Fatia 3): valor cheio vs. valor do serviço com desconto
+  // (sem produtos). O toggle no fechamento só aparece quando há desconto.
+  const commissionHasDiscount = !!detail && (!!detail.discount_type || (detail.discount_value != null && Number(detail.discount_value) > 0))
+  const commissionValorCheio = detail ? Number(detail.total_price) : 0
+  const commissionValorComDesconto = detail
+    ? computeFinalTotal(detail.total_price, detail.discount_type, detail.discount_value, detail.total_override, 0)
+    : 0
+
   const showIniciar = !isClosed && status === 'agendado' && (currentUser.canCreate || allocated)
   const showEditar = !isClosed && !isCancelled && currentUser.canCreate
   const showCancelar = !isClosed && !isCancelled && currentUser.canCreate
@@ -298,6 +306,7 @@ export function ComandaDetailModal(props: Props) {
               depositDefault={props.depositDefault}
               cardTree={props.cardTree}
               cardFeePassthrough={props.cardFeePassthrough}
+              canEditCommission={currentUser.canEditCommission}
               mode="edit"
               initialData={buildInitialData(detail)}
               onCancel={() => setMode('view')}
@@ -474,6 +483,9 @@ export function ComandaDetailModal(props: Props) {
                   paymentMethods={props.paymentMethods.map((m) => ({ id: m.id, name: m.name, kind: m.kind }))}
                   cardTree={props.cardTree}
                   cardFeePassthrough={props.cardFeePassthrough}
+                  commissionHasDiscount={commissionHasDiscount}
+                  commissionValorCheio={commissionValorCheio}
+                  commissionValorComDesconto={commissionValorComDesconto}
                   onDone={onAfterAction}
                 />
               )}

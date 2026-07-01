@@ -62,6 +62,7 @@ export default async function NovaComandaPage() {
         }}
         cardTree={cardTree}
         cardFeePassthrough={settings?.card_fee_passthrough_enabled ?? false}
+        canEditCommission={profile.role === 'dono' || profile.role === 'gerente' || profile.can_edit_commission}
       />
     </div>
   )

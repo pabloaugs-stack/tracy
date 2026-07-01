@@ -319,6 +319,9 @@ export default async function ComandaDetailPage({
               paymentMethods={activeMethods}
               cardTree={cardTree}
               cardFeePassthrough={cardFeePassthrough}
+              commissionHasDiscount={!!hasDiscount}
+              commissionValorCheio={Number(appt.total_price)}
+              commissionValorComDesconto={computeFinalTotal(appt.total_price, appt.discount_type, appt.discount_value, appt.total_override, 0)}
             />
           </div>
         )}

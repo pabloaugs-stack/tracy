@@ -28,6 +28,10 @@ interface Props {
   paymentMethods: PaymentMethodOption[]
   cardTree: CardMachineTree[]
   cardFeePassthrough: boolean
+  // Base de comissão de serviço (Sprint 7 / Fatia 3). O toggle só aparece quando há desconto.
+  commissionHasDiscount?: boolean
+  commissionValorCheio?: number
+  commissionValorComDesconto?: number
   onClose: () => void
   onDone: () => void
 }
@@ -59,12 +63,14 @@ const ERRORS: Record<string, string> = {
 const inputCls =
   'w-full bg-tracy-bg border border-tracy-border rounded-lg px-3 py-2 text-tracy-text text-sm focus:outline-none focus:border-tracy-gold'
 
-export function PaymentSplitModal({ appointmentId, saldo, paymentMethods, cardTree, cardFeePassthrough, onClose, onDone }: Props) {
+export function PaymentSplitModal({ appointmentId, saldo, paymentMethods, cardTree, cardFeePassthrough, commissionHasDiscount = false, commissionValorCheio = 0, commissionValorComDesconto = 0, onClose, onDone }: Props) {
   const [lines, setLines] = useState<Line[]>([
     { payment_method_id: '', amount: saldo.toFixed(2), paid_at: brazilToday(), card_machine_id: '', card_brand_id: '', card_installment_id: '' },
   ])
   const [error, setError] = useState<string | null>(null)
   const [pending, startTransition] = useTransition()
+  // Toggle: aplicar desconto à base de comissão (default OFF = comissão sobre o valor cheio do serviço).
+  const [discountAffectsCommission, setDiscountAffectsCommission] = useState(false)
 
   const kindOf = (methodId: string): PaymentMethodKind | null => paymentMethods.find((m) => m.id === methodId)?.kind ?? null
 
@@ -138,7 +144,7 @@ export function PaymentSplitModal({ appointmentId, saldo, paymentMethods, cardTr
       card_installment_id: kindOf(l.payment_method_id) === 'credito' ? l.card_installment_id : null,
     }))
     startTransition(async () => {
-      const r = await closeAppointmentAction(appointmentId, payments)
+      const r = await closeAppointmentAction(appointmentId, payments, commissionHasDiscount && discountAffectsCommission)
       if (r.error) {
         setError(ERRORS[r.error] ?? r.error)
         return
@@ -253,6 +259,33 @@ export function PaymentSplitModal({ appointmentId, saldo, paymentMethods, cardTr
                 Dividir igual
               </button>
             </div>
+
+            {/* Comissão das profissionais — só quando há desconto na comanda */}
+            {commissionHasDiscount && (
+              <div className="mt-4 pt-3 border-t border-tracy-border">
+                <p className="text-[10px] text-tracy-muted uppercase tracking-widest mb-2">Comissão das profissionais</p>
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <div className="relative mt-0.5 shrink-0">
+                    <div
+                      onClick={() => setDiscountAffectsCommission((v) => !v)}
+                      className={`w-10 h-6 rounded-full transition-colors border ${
+                        discountAffectsCommission ? 'bg-tracy-gold border-tracy-gold' : 'bg-transparent border-tracy-border'
+                      }`}
+                    >
+                      <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${discountAffectsCommission ? 'left-5' : 'left-1'}`} />
+                    </div>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-tracy-text">Aplicar desconto à base de comissão</p>
+                    <p className="text-xs text-tracy-muted mt-0.5">
+                      {discountAffectsCommission
+                        ? `Comissão calculada sobre ${brl(commissionValorComDesconto)} (com desconto)`
+                        : `Comissão calculada sobre ${brl(commissionValorCheio)} (valor cheio)`}
+                    </p>
+                  </div>
+                </label>
+              </div>
+            )}
 
             {/* Footer de totais */}
             <div className="mt-4 pt-3 border-t border-tracy-border flex flex-wrap gap-x-4 gap-y-1 text-xs tabular-nums">

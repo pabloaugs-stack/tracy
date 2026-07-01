@@ -2,10 +2,12 @@
 
 import { useState, useTransition } from 'react'
 import { updateTeamMemberPermissions } from '@/app/actions/team'
+import type { UserRole } from '@/lib/types/database'
 
 interface Props {
   memberId: string
   memberName: string
+  memberRole: UserRole
   // Permissões atuais do membro
   canCreateAppointments: boolean
   canCloseAppointments: boolean
@@ -15,6 +17,7 @@ interface Props {
   canManageCatalogServices: boolean
   canManageCatalogProducts: boolean
   canViewFinancial: boolean
+  canEditCommission: boolean
   discountLimitPercent: number | null
   // Controle de acesso ao modal
   canManage: boolean
@@ -72,6 +75,7 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 export function PermissionsModal({
   memberId,
   memberName,
+  memberRole,
   canCreateAppointments,
   canCloseAppointments,
   canViewOtherAgendas,
@@ -80,6 +84,7 @@ export function PermissionsModal({
   canManageCatalogServices,
   canManageCatalogProducts,
   canViewFinancial,
+  canEditCommission,
   discountLimitPercent,
   canManage,
   isSelf,
@@ -93,7 +98,11 @@ export function PermissionsModal({
   const [localCatalogServices, setLocalCatalogServices] = useState(canManageCatalogServices)
   const [localCatalogProducts, setLocalCatalogProducts] = useState(canManageCatalogProducts)
   const [localFinancial, setLocalFinancial] = useState(canViewFinancial)
+  const [localEditCommission, setLocalEditCommission] = useState(canEditCommission)
   const [localDiscount, setLocalDiscount] = useState<number | null>(discountLimitPercent)
+
+  // Dono/gerente sempre podem editar override por código — a flag só faz sentido para os demais papéis.
+  const showEditCommission = memberRole !== 'dono' && memberRole !== 'gerente'
   const [discountInput, setDiscountInput] = useState(
     discountLimitPercent !== null ? String(discountLimitPercent) : ''
   )
@@ -120,6 +129,7 @@ export function PermissionsModal({
         can_manage_catalog_services: localCatalogServices,
         can_manage_catalog_products: localCatalogProducts,
         can_view_financial: localFinancial,
+        can_edit_commission: localEditCommission,
         discount_limit_percent: localDiscount,
       })
       if ('error' in result) {
@@ -216,8 +226,14 @@ export function PermissionsModal({
             <div className="space-y-4">
               <Toggle checked={localFinancial} onChange={setLocalFinancial} disabled={readOnly}
                 label="Pode acessar o Financeiro"
-                description="Libera o módulo Financeiro (lançamentos, despesas e aportes; caixa e comissões a pagar em breve). O dono sempre tem acesso."
+                description="Libera o módulo Financeiro (lançamentos, comissões a pagar e mais). O dono sempre tem acesso."
               />
+              {showEditCommission && (
+                <Toggle checked={localEditCommission} onChange={setLocalEditCommission} disabled={readOnly}
+                  label="Pode editar comissão por comanda"
+                  description="Libera o override de comissão direto na comanda. Dono e gerente já podem por padrão."
+                />
+              )}
               <div>
                 <p className={`text-sm font-semibold mb-1 ${readOnly ? 'text-tracy-muted' : 'text-tracy-text'}`}>
                   Limite de desconto (%)

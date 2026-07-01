@@ -17,6 +17,7 @@ export type SessionProfile = {
   can_view_other_agendas: boolean
   can_view_other_clients: boolean
   discount_limit_percent: number | null
+  can_edit_commission: boolean
 }
 
 export async function getSessionProfile(): Promise<SessionProfile> {
@@ -29,7 +30,7 @@ export async function getSessionProfile(): Promise<SessionProfile> {
   const admin = createAdminClient()
   const { data: profile } = await admin
     .from('users')
-    .select('id, role, salon_id, name, can_create_appointments, can_manage_clients, can_close_appointments, can_view_financial, can_manage_catalog_services, can_manage_catalog_products, can_view_other_agendas, can_view_other_clients, discount_limit_percent')
+    .select('id, role, salon_id, name, can_create_appointments, can_manage_clients, can_close_appointments, can_view_financial, can_manage_catalog_services, can_manage_catalog_products, can_view_other_agendas, can_view_other_clients, discount_limit_percent, can_edit_commission')
     .eq('id', user.id)
     .single()
 

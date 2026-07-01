@@ -8,6 +8,7 @@ import { CardMachinesSection } from './_components/CardMachinesSection'
 import { CardFeeSettingsSection } from './_components/CardFeeSettingsSection'
 import { DepositSettingsSection } from './_components/DepositSettingsSection'
 import { ProductSettingsSection } from './_components/ProductSettingsSection'
+import { CommissionCycleSection } from './_components/CommissionCycleSection'
 
 export default async function ConfiguracoesPage() {
   const profile = await getSessionProfile()
@@ -34,6 +35,7 @@ export default async function ConfiguracoesPage() {
       <CardFeeSettingsSection settings={settings} />
       <DepositSettingsSection settings={settings} />
       <ProductSettingsSection settings={settings} />
+      <CommissionCycleSection settings={settings} />
     </div>
   )
 }

@@ -64,6 +64,8 @@ interface Props {
   cardTree: CardMachineTree[]
   // Repasse de taxa de cartão ao cliente (salon_settings) — só muda a EXIBIÇÃO ("cobrar no cartão").
   cardFeePassthrough: boolean
+  // Override de comissão por comanda (Sprint 7 / Fatia 3): só dono/gerente ou can_edit_commission edita.
+  canEditCommission?: boolean
   mode?: 'create' | 'edit'
   initialData?: ComandaInitialData
   onCancel?: () => void
@@ -136,6 +138,7 @@ export function ComandaForm({
   depositDefault,
   cardTree,
   cardFeePassthrough,
+  canEditCommission = false,
   mode = 'create',
   initialData,
   onCancel,
@@ -502,20 +505,24 @@ export function ComandaForm({
                         <option value="auxiliar">Auxiliar (nesta comanda)</option>
                       </select>
 
-                      <input
-                        type="number"
-                        min="0"
-                        max="100"
-                        step="0.1"
-                        value={entry.commission_override}
-                        onChange={(e) => updateProf(entry.key, { commission_override: e.target.value })}
-                        placeholder={
-                          defaultComm !== null
-                            ? `Comissão % — padrão: ${defaultComm}%`
-                            : 'Comissão % (opcional)'
-                        }
-                        className={innerInputCls}
-                      />
+                      {/* Override de comissão: só dono/gerente ou can_edit_commission edita. O valor
+                          existente é sempre preservado pelo input oculto abaixo. */}
+                      {canEditCommission && (
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.1"
+                          value={entry.commission_override}
+                          onChange={(e) => updateProf(entry.key, { commission_override: e.target.value })}
+                          placeholder={
+                            defaultComm !== null
+                              ? `Comissão override % — padrão: ${defaultComm}%`
+                              : 'Comissão override % (opcional)'
+                          }
+                          className={innerInputCls}
+                        />
+                      )}
                     </div>
                     <button
                       type="button"
