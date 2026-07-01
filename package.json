@@ -34,7 +34,8 @@
     "test:installment-options": "tsx scripts/test-installment-options.ts",
     "test:financial-entries": "tsx scripts/test-financial-entries.ts",
     "test:inventory-lots": "tsx scripts/test-inventory-lots.ts",
-    "test:commission": "tsx scripts/test-commission.ts"
+    "test:commission": "tsx scripts/test-commission.ts",
+    "test:cashflow": "tsx scripts/test-cashflow.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

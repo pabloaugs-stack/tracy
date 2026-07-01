@@ -23,6 +23,7 @@ import type {
 } from '@/lib/types/database'
 import { ComandaForm, type ComandaInitialData } from '../nova-comanda/_components/ComandaForm'
 import { CloseReopenButton } from '../[id]/_components/CloseReopenButton'
+import { formatAppointmentNumber } from '@/lib/appointments/format'
 import { ComandaProductsSection } from './ComandaProductsSection'
 import { ComandaMaterialsSection } from './ComandaMaterialsSection'
 import type { CurrentUser, DepositDefault, ProductConfig } from './AgendaGrid'
@@ -317,7 +318,12 @@ export function ComandaDetailModal(props: Props) {
             {/* Cabeçalho */}
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h2 className="text-lg font-black tracking-tight text-tracy-text">{detail.client.name}</h2>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-black tracking-tight text-tracy-text">{detail.client.name}</h2>
+                  <span className="text-[11px] font-semibold tabular-nums text-tracy-muted bg-tracy-surface border border-tracy-border rounded px-1.5 py-0.5">
+                    {formatAppointmentNumber(detail.appointment_number)}
+                  </span>
+                </div>
                 <p className="text-tracy-muted text-xs mt-0.5">{formatDateTime(detail.scheduled_at)}</p>
                 <div className="flex items-center gap-2 mt-2">
                   <span className={`text-[10px] font-bold border rounded px-2 py-0.5 uppercase tracking-widest ${STATUS_COLORS[status]}`}>

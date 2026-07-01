@@ -208,6 +208,8 @@ export type AppointmentRow = {
   closed_at: string | null
   // Sprint 7 / Fatia 3 — se o desconto entra na base de comissão de serviço (referência histórica)
   discount_affects_commission: boolean
+  // Sprint 7 / Fatia 4 — número sequencial por salão (trigger BEFORE INSERT); null = comanda legada
+  appointment_number: number | null
   notes: string | null
   created_at: string
   updated_at: string
@@ -247,6 +249,9 @@ export type SalonSettingsRow = {
   card_fee_passthrough_enabled: boolean
   // Sprint 7 / Fatia 3 — ciclo padrão de comissão (só pré-filtra a tela de pendências)
   commission_cycle: CommissionCycle
+  // Sprint 7 / Fatia 4 — saldo inicial do Caixa (date null = incluir toda a história)
+  opening_balance: number
+  opening_balance_date: string | null
   created_at: string
   updated_at: string
 }
@@ -260,6 +265,8 @@ export type SalonSettingsInsert = {
   allow_edit_product_price?: boolean
   card_fee_passthrough_enabled?: boolean
   commission_cycle?: CommissionCycle
+  opening_balance?: number
+  opening_balance_date?: string | null
   created_at?: string
   updated_at?: string
 }
@@ -610,6 +617,7 @@ export type FinancialEntryInsert = {
 export type FinancialEntryUpdate = Partial<Omit<FinancialEntryInsert, 'id'>>
 
 // inventory_purchases (Sprint 7 / Fatia 2 — nota de compra)
+export type PurchaseStatus = 'pendente' | 'pago'
 export type InventoryPurchaseRow = {
   id: string
   salon_id: string
@@ -618,6 +626,8 @@ export type InventoryPurchaseRow = {
   total_cost: number
   created_by: string | null
   is_opening_stock: boolean
+  // Sprint 7 / Fatia 4 — status de pagamento da nota (default 'pago' preserva legado à vista)
+  status: PurchaseStatus
   active: boolean
   created_at: string
   updated_at: string
@@ -630,11 +640,45 @@ export type InventoryPurchaseInsert = {
   total_cost?: number
   created_by?: string | null
   is_opening_stock?: boolean
+  status?: PurchaseStatus
   active?: boolean
   created_at?: string
   updated_at?: string
 }
 export type InventoryPurchaseUpdate = Partial<Omit<InventoryPurchaseInsert, 'id'>>
+
+// inventory_purchase_payments (Sprint 7 / Fatia 4 — parcelas de pagamento de uma compra)
+export type InventoryPurchasePaymentRow = {
+  id: string
+  salon_id: string
+  purchase_id: string
+  payment_method_id: string | null
+  amount: number
+  due_date: string
+  paid_at: string | null
+  status: PurchaseStatus
+  installment_number: number
+  installment_total: number
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+export type InventoryPurchasePaymentInsert = {
+  id?: string
+  salon_id: string
+  purchase_id: string
+  payment_method_id?: string | null
+  amount: number
+  due_date: string
+  paid_at?: string | null
+  status?: PurchaseStatus
+  installment_number?: number
+  installment_total?: number
+  notes?: string | null
+  created_at?: string
+  updated_at?: string
+}
+export type InventoryPurchasePaymentUpdate = Partial<Omit<InventoryPurchasePaymentInsert, 'id'>>
 
 // inventory_lots (Sprint 7 / Fatia 2 — lote FIFO; item_id é polimórfico via item_type)
 export type InventoryLotRow = {
@@ -820,6 +864,7 @@ export type Database = {
       card_installment_fees: { Row: CardInstallmentFeeRow; Insert: CardInstallmentFeeInsert; Update: CardInstallmentFeeUpdate; Relationships: never[] }
       financial_entries: { Row: FinancialEntryRow; Insert: FinancialEntryInsert; Update: FinancialEntryUpdate; Relationships: never[] }
       inventory_purchases: { Row: InventoryPurchaseRow; Insert: InventoryPurchaseInsert; Update: InventoryPurchaseUpdate; Relationships: never[] }
+      inventory_purchase_payments: { Row: InventoryPurchasePaymentRow; Insert: InventoryPurchasePaymentInsert; Update: InventoryPurchasePaymentUpdate; Relationships: never[] }
       inventory_lots: { Row: InventoryLotRow; Insert: InventoryLotInsert; Update: InventoryLotUpdate; Relationships: never[] }
       inventory_lot_consumptions: { Row: InventoryLotConsumptionRow; Insert: InventoryLotConsumptionInsert; Update: InventoryLotConsumptionUpdate; Relationships: never[] }
       commission_entries: { Row: CommissionEntryRow; Insert: CommissionEntryInsert; Update: CommissionEntryUpdate; Relationships: never[] }

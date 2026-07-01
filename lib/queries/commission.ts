@@ -28,6 +28,7 @@ export type CommissionEntryWithContext = {
   created_at: string
   scheduled_at: string | null
   closed_at: string | null
+  appointmentNumber: number | null
   clientName: string | null
   serviceName: string | null
 }
@@ -59,6 +60,7 @@ type RawEntry = {
   appointment: {
     scheduled_at: string | null
     closed_at: string | null
+    appointment_number: number | null
     client: { name: string } | null
     service: { name: string } | null
   } | null
@@ -78,7 +80,7 @@ export async function listCommissionEntries(
       commission_payment_id, resolved_at, created_at,
       professional:users!commission_entries_professional_id_fkey(name, role),
       appointment:appointments!commission_entries_appointment_id_fkey(
-        scheduled_at, closed_at,
+        scheduled_at, closed_at, appointment_number,
         client:clients!appointments_client_id_fkey(name),
         service:services!appointments_service_id_fkey(name)
       )
@@ -115,6 +117,7 @@ export async function listCommissionEntries(
     created_at: e.created_at,
     scheduled_at: e.appointment?.scheduled_at ?? null,
     closed_at: e.appointment?.closed_at ?? null,
+    appointmentNumber: e.appointment?.appointment_number ?? null,
     clientName: e.appointment?.client?.name ?? null,
     serviceName: e.appointment?.service?.name ?? null,
   }))

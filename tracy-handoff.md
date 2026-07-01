@@ -44,6 +44,7 @@ Scripts de teste (todos verdes na entrega do BLOCO 8.1.1):
 | `test:permissions-status-settings` | fechar/reabrir por role, flags de permissão, comanda fechada trava status, limite de desconto | 22/22 |
 | `test:comanda-completa` | cliente/cor inline, role_in_appointment, desconto, total_override, materiais, isolamento de cores | 29/29 |
 | `test:commission` | resolução por tipo/papel, override gated, comissão de produto, has_divergence no refechamento, RLS de commission_entries, base com/sem desconto, registrar pagamento | 14/14 |
+| `test:cashflow` | número de comanda (sequência por salão, NULL legado), `formatAppointmentNumber`, extrato do Caixa (categorização das 4 fontes, saldo inicial, filtro de data, running_balance), previsão, validação de parcelas + marcar pago | 22/22 (14 cenários) |
 | `test:comanda-fixes`, `test:agenda-refinada`, `test:active-inactive`, `test:can-create-appointments`, `test:permissions-deposit` | regressões de blocos anteriores | — |
 
 ---
@@ -273,12 +274,36 @@ Coberto por `test:commission` (14/14) + regressões verdes (`test:close-as-alloc
 
 ---
 
+## BLOCO Sprint 7 / Fatia 4 — Caixa (extrato com saldo acumulado) + número de comanda (implementado, aguardando validação visual do Pablo)
+Coberto por `test:cashflow` (22 checks / 14 cenários, 22/22) + regressões verdes (`test:commission` 14/14, `test:inventory-lots` 25/25, `test:financial-entries` 34/34, `test:payment-split` 20/20, `test:comanda-completa` 29/29, `test:close-as-allocated` 13/13). `type-check` limpo, `next build` OK.
+
+**Modelo (migration `sprint7_fatia4_caixa`):**
+- **`appointments.appointment_number` (integer, nullable)** + trigger **`assign_appointment_number`** (BEFORE INSERT, SECURITY DEFINER SET search_path=public): gera `MAX(appointment_number)+1` **por salão** (não global). Índice único parcial `uq_appointments_number_per_salon (salon_id, appointment_number) WHERE appointment_number IS NOT NULL`. Comandas legadas ficam com número NULL (o trigger só atua em INSERTs novos) → exibidas como "#—".
+- **`salon_settings.opening_balance` (numeric(10,2) NOT NULL DEFAULT 0)** + **`opening_balance_date` (date, nullable)**: saldo inicial do Caixa. `opening_balance_date` NULL = incluir toda a história; preenchida = extrato começa nessa data.
+- **`inventory_purchases.status` (text NOT NULL DEFAULT 'pago', CHECK pendente|pago)**: default 'pago' preserva a semântica legada (compras à vista). Sincronizado com as parcelas quando existem.
+- **`inventory_purchase_payments`** (nova tabela): N parcelas independentes por compra (inspirada em `appointment_payments`). Colunas: salon_id, purchase_id (FK RESTRICT), payment_method_id (FK RESTRICT, nullable), amount(>0), due_date, paid_at (nullable), status (pendente|pago), installment_number/installment_total (CHECK number≤total), notes. CHECKs `paid_at↔status`. RLS: SELECT por salão; INSERT/UPDATE dono/gerente; **sem DELETE**.
+
+**Caixa é CALCULADO (não é tabela) em regime de caixa.** Fórmula: `opening_balance + Σ appointment_payments.amount (por paid_at) + Σ aportes − Σ despesas/retiradas pagas − Σ commission_payments − Σ parcelas de compra pagas`. Só conta a partir de `opening_balance_date` (se configurada). Compras **legadas sem parcelas** são ignoradas como saída (o Caixa só olha `inventory_purchase_payments` status='pago', nunca `inventory_purchases` diretamente).
+
+**Lógica pura separada da IO (para testabilidade):** `lib/cashflow/compute.ts` (PURA, sem IO) — `assembleMovements`, `buildRunningBalance`, `filterForDisplay`, `summarize`, `assemblePreview`, tipos `CashflowEntry`/`CashflowPreviewEntry`/`CashflowSummary`/`CashflowFilters` + as row-shapes agnósticas de IO. `lib/queries/cashflow.ts` é a camada de IO fina: `getCashflowEntries`, `getCashflowSummary`, `getCashflowPreview` (fetch das 4 fontes + delega à camada pura). `running_balance` é acumulado no servidor após ordenação por (date, created_at) — **NUNCA armazenado no banco**; é o saldo REAL do caixa naquele ponto (inclui movimentações anteriores ao início do período, como extrato bancário). `lib/appointments/format.ts` → `formatAppointmentNumber` (helper compartilhado: null→"#—", pad 3 dígitos).
+
+**Actions (`app/actions/cashflow.ts`):** `updateOpeningBalanceAction` (gate `canViewFinancial`; write via **admin client** porque a RLS de UPDATE em salon_settings é dono/gerente-only e o gate do módulo é `can_view_financial` — o gate de código é o guarda real). `createPurchasePaymentsAction` (gate dono/gerente; valida Σ parcelas = total_cost tol. R$0,01, vencimentos crescentes; nasce tudo pendente; sincroniza `inventory_purchases.status`). `markPurchasePaymentPaidAction` (gate dono/gerente; recusa data futura; sincroniza status da compra). `createPurchaseAction` (inventory.ts) passou a **retornar `purchaseId`** para o `PurchaseModal` gravar as parcelas em seguida.
+
+**Queries de parcela (`lib/queries/inventory.ts`):** `listPurchasePayments`, `getPurchasePaymentSummary`, `listPaymentsForPurchases` (mapa purchase→parcelas para a lista de Compras).
+
+**UI:** número de comanda ("#001") no card da agenda (`ComandaCard`), header do `ComandaDetailModal`, título de `/admin/agenda/[id]` e lista de Comissões a pagar (`CommissionTab`). Aba **Caixa** deixou de ser "breve" → rota `/admin/financeiro/caixa` (`CaixaTab`): 4 cards de resumo, 4 modos de exibição (evento/dia/semana/categoria), filtros Tipo/Categoria/Período (reusa `ReportFilters`), tabela com saldo acumulado, linha de saldo inicial, seção **Previsão** (30 dias, tracejada) e banner de config. Seção **Caixa** em `/admin/configuracoes` (`CashSettingsSection`, âncora `#caixa`, renderizada só quando `canViewFinancial`). `PurchaseModal` ganhou toggle "Registrar pagamento desta compra" + parcelas ("Calcular" divide igual); lista de Compras mostra status de pagamento + botão Registrar/Gerir → `PurchasePaymentsModal` (ver parcelas, marcar pago, ou criar parcelas depois).
+
+**Próxima fatia:** Fatia 5 (Lucro real / DRE — regime de competência; consome `fee_amount` + COGS por lote da Fatia 2 + comissão gerada da Fatia 3).
+
+---
+
 ## ✅ Concluído
 Sprint 1 (Fundação) · Sprint 2 (Auth/permissões) · Sprint 3 (Catálogo + templates AUG) · Sprint 4 Fatias 1–2 (clientes + comanda + profissionais) e Fatia 3 (status + busca) · BLOCO 7 (pagamento) · BLOCO 8 (agenda grid) · BLOCO 8.1 (dona solo + refinos) · BLOCO 8.1.1 (fixes) · BLOCO 9 (produtos + estoque) · BLOCO 10 (estoque 2 níveis + baixa de insumo + Relatórios MVP — **validado visualmente pelo Pablo**, 8/8 itens do checklist) · BLOCO 11 (fix subheader agenda + Dashboard de métricas + cadastro da árvore de cartão — **validado visualmente pelo Pablo**) · BLOCO Pagamento dividido (N formas no fechamento + consumo da árvore de cartão; sinal de crédito usa a árvore; "à vista" = 1x; repasse de taxa ao cliente opcional — **validado visualmente pelo Pablo**) · **Sprint 7 / Fatia 1 — Lançamentos financeiros** (entradas/saídas, recorrência preguiçosa, gate `can_view_financial`, dashboard de vencimentos, projeção somente-leitura, despesas fixas ativas — **validado visualmente pelo Pablo**, `test:financial-entries` 34/34) · **Sprint 7 / Fatia 2 — Estoque por lote (FIFO)** (`test:inventory-lots` 25/25).
 - **Pausa de infra (GitHub + Vercel) — CONCLUÍDA.** O repo está conectado (`origin = github.com/pabloaugs-stack/tracy`, branch `main`, deploy automático no Vercel). Sessões novas: o ambiente pode reportar "não é repositório git" no header inicial — **confirmar com `git rev-parse --is-inside-work-tree` antes de assumir**; nesta sessão estava OK.
 
 ## ⚠️ Em andamento
-- **BLOCO Sprint 7 / Fatia 3 — Comissão automática + Comissões a pagar:** implementado, `test:commission` 14/14, regressões verdes, `type-check` limpo, `next build` OK. **Aguardando validação visual do Pablo**: bloco Comissão na Equipe (tipo + percentuais + comissão de produto + `can_edit_commission`); fechar comanda gera pendências por profissional; toggle de desconto na base quando há desconto; aba Comissões a pagar (filtros, seleção livre, registrar pagamento, badges de divergência/desconto/override); ciclo em Configurações. Depois disso, seguir para a Fatia 4 (Caixa).
+- **BLOCO Sprint 7 / Fatia 4 — Caixa + número de comanda:** implementado, `test:cashflow` 22/22 (14 cenários), regressões verdes, `type-check` limpo, `next build` OK. **Aguardando validação visual do Pablo**: número "#001" na agenda/modal/detalhe/comissões; aba Caixa (`/admin/financeiro/caixa`) com resumo, modos de exibição, filtros, saldo acumulado, previsão; saldo inicial em Configurações; parcelas de compra no `PurchaseModal` + gestão na lista de Compras (marcar pago). Depois disso, seguir para a Fatia 5 (Lucro real / DRE).
+- **BLOCO Sprint 7 / Fatia 3 — Comissão automática + Comissões a pagar:** implementado, `test:commission` 14/14, regressões verdes, `type-check` limpo, `next build` OK. **Aguardando validação visual do Pablo**: bloco Comissão na Equipe (tipo + percentuais + comissão de produto + `can_edit_commission`); fechar comanda gera pendências por profissional; toggle de desconto na base quando há desconto; aba Comissões a pagar (filtros, seleção livre, registrar pagamento, badges de divergência/desconto/override); ciclo em Configurações.
 - **BLOCO Sprint 7 / Fatia 2 — Estoque por lote (FIFO):** implementado, `test:inventory-lots` 25/25, no `main`. **Aguardando validação visual do Pablo**: registrar compra (gera lote+custo) → estoque sobe; consumo na comanda baixa FIFO do lote mais antigo; correção negativa; banner de estoque inicial; aba Produtos no Estoque; Catálogo sem Produtos.
 
 ## 🐞 Pendências abertas (não bloqueiam fila)
@@ -323,10 +348,11 @@ Desenho fechado com o Pablo em sessão dedicada de chat (Project Chat). Cinco fa
 - Config opcional em Configurações: "ciclo de pagamento padrão do salão" (semanal/quinzenal/mensal/livre) — só pré-filtra a tela de pendências.
 - Edge case conhecido: reabertura de comanda cuja comissão já foi paga. Por ora não travar; sinalizar divergência se o valor mudar.
 
-**Fatia 4 — Caixa (depende da 1, 2 e 3):**
-- Extrato com saldo acumulado, CALCULADO (não é tabela própria) a partir de: + pagamentos recebidos (appointment_payments, por paid_at) + entradas (aporte) − despesas pagas − comissões pagas − retiradas − compras de estoque pagas (lotes).
-- Saldo inicial configurável uma vez em Configurações (editável depois), mesmo gate `can_view_financial`.
-- Filtro de período reusando o padrão já usado em Relatórios.
+**Fatia 4 — Caixa (concluída ✅ — ver seção do bloco acima):**
+- Extrato com saldo acumulado, CALCULADO (não é tabela própria) a partir de: + pagamentos recebidos (appointment_payments, por paid_at) + entradas (aporte) − despesas pagas − comissões pagas − retiradas − parcelas de compra pagas (`inventory_purchase_payments`).
+- Saldo inicial configurável em Configurações (editável depois), gate `can_view_financial`.
+- Filtro de período reusando o padrão de Relatórios; modos de exibição evento/dia/semana/categoria.
+- Extra desta fatia: número sequencial de comanda por salão (`appointment_number` via trigger), exibido como "#001".
 
 **Fatia 5 — Lucro real / DRE (depende de 1, 2, 3 e 4):**
 - Regime de COMPETÊNCIA (não caixa) — conta o que foi gerado no período, pago ou não.

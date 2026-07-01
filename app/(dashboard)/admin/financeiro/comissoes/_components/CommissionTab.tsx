@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { CommissionEntryWithContext } from '@/lib/queries/commission'
 import type { CommissionCycle, UserRole } from '@/lib/types/database'
+import { formatAppointmentNumber } from '@/lib/appointments/format'
 import { CommissionPaymentModal } from './CommissionPaymentModal'
 
 interface Props {
@@ -167,6 +168,7 @@ export function CommissionTab({ entries, professionals, today, commissionCycle }
                             {e.serviceName ?? 'Serviço'} <span className="text-tracy-muted">· {e.clientName ?? 'Cliente'}</span>
                           </p>
                           <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                            <span className="text-[11px] font-semibold tabular-nums text-tracy-muted/70">{formatAppointmentNumber(e.appointmentNumber)}</span>
                             <span className="text-[11px] text-tracy-muted">{fmtDate(e.closed_at ?? e.scheduled_at)}</span>
                             {e.status === 'pago' && <Badge tone="muted">paga</Badge>}
                             {e.has_divergence && <Badge tone="warn">Valor alterado</Badge>}

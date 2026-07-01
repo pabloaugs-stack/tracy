@@ -5,7 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { getSessionProfile } from '@/lib/auth/session'
 import type { InventoryItemType, ProductUnit } from '@/lib/types/database'
 
-export type InventoryActionResult = { error?: string; success?: boolean }
+export type InventoryActionResult = { error?: string; success?: boolean; purchaseId?: string }
 
 // Gate: só dono/gerente operam compras e correções (espelha a RLS de inventory_purchases).
 function canManageInventory(profile: { role: string }): boolean {
@@ -172,7 +172,7 @@ async function persistPurchase(
   }
 
   revalidatePath('/admin/estoque')
-  return { success: true }
+  return { success: true, purchaseId: purchase.id }
 }
 
 // ── Registrar compra (nota com N itens mistos: insumos e/ou produtos) ──

@@ -7,7 +7,9 @@ import {
   listInsumosBySalon,
   listProductsForEstoque,
   hasOpeningStockAlert,
+  listPaymentsForPurchases,
 } from '@/lib/queries/inventory'
+import { listActivePaymentMethods } from '@/lib/queries/payment-methods'
 import { EstoqueTabs } from './_components/EstoqueTabs'
 import type { PurchaseItem } from './_components/PurchaseModal'
 
@@ -26,13 +28,18 @@ export default async function EstoquePage({
     ? (params.tab as (typeof VALID_TABS)[number])
     : 'compras'
 
-  const [purchases, insumos, products, openingAlert, settings] = await Promise.all([
+  const [purchasesRaw, insumos, products, openingAlert, settings, paymentMethods] = await Promise.all([
     listInventoryPurchases(profile.salon_id),
     listInsumosBySalon(profile.salon_id),
     listProductsForEstoque(profile.salon_id),
     hasOpeningStockAlert(profile.salon_id),
     getSalonSettings(),
+    listActivePaymentMethods(profile.salon_id),
   ])
+
+  // Enriquece cada compra com suas parcelas (para exibir status de pagamento e gerir na lista).
+  const paymentsByPurchase = await listPaymentsForPurchases(purchasesRaw.map((p) => p.id), profile.salon_id)
+  const purchases = purchasesRaw.map((p) => ({ ...p, payments: paymentsByPurchase.get(p.id) ?? [] }))
 
   // Itens disponíveis para a compra (insumos + produtos ativos) com unidades padrão.
   const purchaseItems: PurchaseItem[] = [
@@ -80,6 +87,7 @@ export default async function EstoquePage({
         insumos={insumos}
         products={products}
         purchaseItems={purchaseItems}
+        paymentMethods={paymentMethods.map((m) => ({ id: m.id, name: m.name }))}
         openingAlert={openingAlert}
         showCommissionField={showProductCommission}
       />

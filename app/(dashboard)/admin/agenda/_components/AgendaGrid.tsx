@@ -220,6 +220,7 @@ export function AgendaGrid(props: Props) {
                         time={brazilTime(appt.scheduled_at)}
                         status={appt.status}
                         isClosed={appt.closed_at !== null}
+                        appointmentNumber={appt.appointment_number}
                         onClick={() => setSelectedId(appt.id)}
                       />
                     </div>

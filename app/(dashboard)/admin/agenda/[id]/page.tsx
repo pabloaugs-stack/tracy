@@ -9,6 +9,7 @@ import { listActiveCardMachineTree } from '@/lib/queries/card-machines'
 import { getSalonSettings } from '@/app/actions/salon-settings'
 import type { AppointmentStatus, RoleInAppointment, MaterialType, PaymentMethodKind } from '@/lib/types/database'
 import type { CardMachineTree } from '@/lib/queries/card-machines'
+import { formatAppointmentNumber } from '@/lib/appointments/format'
 import StatusForm from './_components/StatusForm'
 import { CloseReopenButton } from './_components/CloseReopenButton'
 
@@ -138,7 +139,7 @@ export default async function ComandaDetailPage({
       <div className="flex items-start justify-between mb-8">
         <div>
           <h1 className="text-2xl font-black tracking-tight text-tracy-text">
-            {appt.client.name}
+            Comanda {formatAppointmentNumber(appt.appointment_number)} · {appt.client.name}
           </h1>
           <p className="text-tracy-muted text-sm mt-0.5">{formatDateTime(appt.scheduled_at)}</p>
         </div>

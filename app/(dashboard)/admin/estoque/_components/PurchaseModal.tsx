@@ -3,6 +3,7 @@
 import { useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { createPurchaseAction, registerOpeningStockAction } from '@/app/actions/inventory'
+import { createPurchasePaymentsAction } from '@/app/actions/cashflow'
 
 // Item já cadastrado disponível para compra (insumo ou produto), com unidades padrão.
 export type PurchaseItem = {
@@ -15,12 +16,18 @@ export type PurchaseItem = {
   conversion_factor: number
 }
 
+export type PurchasePaymentMethod = { id: string; name: string }
+
 interface Props {
   mode: 'purchase' | 'opening'
   items: PurchaseItem[]
+  paymentMethods?: PurchasePaymentMethod[]
   onClose: () => void
   onSaved: () => void
 }
+
+// Uma parcela editável do pagamento da compra.
+type Installment = { key: string; amount: string; dueDate: string; methodId: string }
 
 type Line = {
   key: string
@@ -60,13 +67,18 @@ function brl(v: number) {
   return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 }
 
-export function PurchaseModal({ mode, items, onClose, onSaved }: Props) {
+export function PurchaseModal({ mode, items, paymentMethods = [], onClose, onSaved }: Props) {
   const router = useRouter()
   const [lines, setLines] = useState<Line[]>([newLine()])
   const [date, setDate] = useState(() => new Intl.DateTimeFormat('sv', { timeZone: 'America/Sao_Paulo' }).format(new Date()))
   const [notes, setNotes] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [pending, startTransition] = useTransition()
+
+  // Pagamento da compra (parcelas) — só na compra normal.
+  const [payEnabled, setPayEnabled] = useState(false)
+  const [installmentCount, setInstallmentCount] = useState('1')
+  const [installments, setInstallments] = useState<Installment[]>([])
 
   const isOpening = mode === 'opening'
 
@@ -100,12 +112,45 @@ export function PurchaseModal({ mode, items, onClose, onSaved }: Props) {
     [lines]
   )
 
+  const installmentsSum = useMemo(
+    () => installments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0),
+    [installments]
+  )
+  const installmentsMatch = Math.abs(Math.round(installmentsSum * 100) / 100 - Math.round(total * 100) / 100) <= 0.01
+
+  // Divide o total igualmente em N parcelas (resto de centavos na última) e gera as linhas editáveis.
+  function computeInstallments() {
+    const n = Math.max(1, Math.min(24, parseInt(installmentCount, 10) || 1))
+    const cents = Math.round(total * 100)
+    const base = Math.floor(cents / n)
+    const rows: Installment[] = []
+    for (let i = 0; i < n; i++) {
+      const amountCents = i === n - 1 ? cents - base * (n - 1) : base
+      // Vencimento: primeira parcela na data da compra; demais +30 dias por parcela.
+      const [y, mo, d] = date.split('-').map(Number)
+      const due = new Date(Date.UTC(y, mo - 1, d + i * 30)).toISOString().slice(0, 10)
+      rows.push({ key: Math.random().toString(36).slice(2), amount: (amountCents / 100).toFixed(2), dueDate: due, methodId: '' })
+    }
+    setInstallments(rows)
+  }
+
+  function patchInstallment(key: string, p: Partial<Installment>) {
+    setInstallments((prev) => prev.map((x) => (x.key === key ? { ...x, ...p } : x)))
+  }
+
   function submit() {
     setError(null)
     // Validação leve no cliente (a action revalida tudo).
     for (const l of lines) {
       if (!l.itemId && !l.newName.trim()) { setError('Selecione um item ou informe o nome de um novo.'); return }
       if (!(parseFloat(l.qty) > 0)) { setError('Informe a quantidade comprada de cada item.'); return }
+    }
+    if (!isOpening && payEnabled) {
+      if (installments.length === 0) { setError('Clique em "Calcular" para gerar as parcelas.'); return }
+      if (!installmentsMatch) { setError('A soma das parcelas deve ser igual ao total da compra.'); return }
+      for (const p of installments) {
+        if (!p.dueDate) { setError('Informe o vencimento de cada parcela.'); return }
+      }
     }
 
     const fd = new FormData()
@@ -132,6 +177,26 @@ export function PurchaseModal({ mode, items, onClose, onSaved }: Props) {
         setError(r.error === 'sem_permissao' ? 'Sem permissão para registrar compras.' : r.error)
         return
       }
+
+      // Registrar parcelas após criar a compra (precisa do purchase_id).
+      if (!isOpening && payEnabled && r.purchaseId) {
+        const pf = new FormData()
+        pf.set('purchase_id', r.purchaseId)
+        pf.set('pay_count', String(installments.length))
+        installments.forEach((p, i) => {
+          pf.set(`pay_amount_${i}`, p.amount)
+          pf.set(`pay_due_date_${i}`, p.dueDate)
+          pf.set(`pay_method_${i}`, p.methodId)
+        })
+        const pr = await createPurchasePaymentsAction(pf)
+        if ('error' in pr) {
+          // A compra foi criada; só as parcelas falharam. Avisa e deixa o usuário adicioná-las na lista.
+          setError(`Compra registrada, mas as parcelas não foram salvas: ${pr.error}. Adicione-as na lista de compras.`)
+          router.refresh()
+          return
+        }
+      }
+
       onSaved()
       router.refresh()
     })
@@ -255,6 +320,64 @@ export function PurchaseModal({ mode, items, onClose, onSaved }: Props) {
           <button type="button" onClick={() => setLines((p) => [...p, newLine()])} className="text-xs text-tracy-gold hover:underline">
             + Adicionar item
           </button>
+
+          {/* Forma de pagamento (parcelas) — só na compra normal */}
+          {!isOpening && (
+            <div className="border-t border-tracy-border pt-4 space-y-3">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={payEnabled}
+                  onChange={(e) => { setPayEnabled(e.target.checked); if (!e.target.checked) setInstallments([]) }}
+                  className="accent-tracy-gold w-4 h-4"
+                />
+                <span className="text-sm text-tracy-text">Registrar pagamento desta compra</span>
+              </label>
+
+              {payEnabled && (
+                <div className="space-y-3 pl-6">
+                  <div className="flex items-end gap-2">
+                    <div>
+                      <label className={labelCls}>Quantidade de parcelas</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="24"
+                        value={installmentCount}
+                        onChange={(e) => setInstallmentCount(e.target.value)}
+                        className={inputCls + ' w-28'}
+                      />
+                    </div>
+                    <button type="button" onClick={computeInstallments} className="text-xs bg-tracy-surface border border-tracy-border text-tracy-text rounded-lg px-3 py-2 hover:border-tracy-muted">
+                      Calcular
+                    </button>
+                  </div>
+
+                  {installments.length > 0 && (
+                    <div className="space-y-2">
+                      {installments.map((p, i) => (
+                        <div key={p.key} className="grid grid-cols-[70px_1fr_1fr_1.2fr] gap-2 items-center">
+                          <span className="text-[11px] text-tracy-muted">Parcela {i + 1}/{installments.length}</span>
+                          <input type="date" value={p.dueDate} onChange={(e) => patchInstallment(p.key, { dueDate: e.target.value })} className={inputCls} />
+                          <input type="number" min="0" step="0.01" value={p.amount} onChange={(e) => patchInstallment(p.key, { amount: e.target.value })} className={inputCls} />
+                          <select value={p.methodId} onChange={(e) => patchInstallment(p.key, { methodId: e.target.value })} className={inputCls}>
+                            <option value="">Forma (opcional)</option>
+                            {paymentMethods.map((m) => (
+                              <option key={m.id} value={m.id}>{m.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      ))}
+                      <p className={`text-[11px] ${installmentsMatch ? 'text-tracy-muted' : 'text-red-400'}`}>
+                        Soma das parcelas: <span className="tabular-nums">{brl(installmentsSum)}</span> / total {brl(total)}
+                        {!installmentsMatch && ' — precisa bater com o total'}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="flex items-center justify-between pt-2 border-t border-tracy-border">
             <span className="text-sm text-tracy-muted">Total da nota: <span className="text-tracy-text font-semibold">{brl(total)}</span></span>

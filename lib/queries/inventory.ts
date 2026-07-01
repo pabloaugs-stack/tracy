@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import type {
   InventoryPurchaseRow,
+  InventoryPurchasePaymentRow,
   InventoryLotRow,
   InventoryItemType,
   MaterialColorRow,
@@ -31,6 +32,80 @@ export async function listInventoryPurchases(salonId: string): Promise<PurchaseL
     counts.set(l.purchase_id, (counts.get(l.purchase_id) ?? 0) + 1)
   }
   return (purchases ?? []).map((p) => ({ ...p, lot_count: counts.get(p.id) ?? 0 }))
+}
+
+// ── Parcelas de pagamento de uma compra (Sprint 7 / Fatia 4) ──
+
+// Lista as parcelas de uma compra, em ordem de parcela. Escopo por salão garantido pela RLS.
+export async function listPurchasePayments(
+  purchaseId: string,
+  salonId: string
+): Promise<InventoryPurchasePaymentRow[]> {
+  const supabase = await createClient()
+  const { data, error } = await supabase
+    .from('inventory_purchase_payments')
+    .select('*')
+    .eq('salon_id', salonId)
+    .eq('purchase_id', purchaseId)
+    .order('installment_number', { ascending: true })
+  if (error) throw error
+  return data ?? []
+}
+
+// Resumo de pagamento de uma compra: total pago (parcelas status='pago') vs total da nota.
+export type PurchasePaymentSummary = {
+  total_cost: number
+  total_paid: number
+  total_pending: number
+  installment_count: number
+  has_payments: boolean
+}
+export async function getPurchasePaymentSummary(
+  purchaseId: string,
+  salonId: string
+): Promise<PurchasePaymentSummary> {
+  const supabase = await createClient()
+  const [{ data: purchase }, { data: payments }] = await Promise.all([
+    supabase.from('inventory_purchases').select('total_cost').eq('id', purchaseId).eq('salon_id', salonId).maybeSingle(),
+    supabase.from('inventory_purchase_payments').select('amount, status').eq('purchase_id', purchaseId).eq('salon_id', salonId),
+  ])
+  const rows = payments ?? []
+  let paid = 0
+  let pending = 0
+  for (const p of rows) {
+    if (p.status === 'pago') paid += Number(p.amount)
+    else pending += Number(p.amount)
+  }
+  return {
+    total_cost: purchase?.total_cost != null ? Number(purchase.total_cost) : 0,
+    total_paid: Math.round(paid * 100) / 100,
+    total_pending: Math.round(pending * 100) / 100,
+    installment_count: rows.length,
+    has_payments: rows.length > 0,
+  }
+}
+
+// Todas as parcelas de N compras de uma vez (mapa purchase_id → parcelas). Para a lista da aba Compras.
+export async function listPaymentsForPurchases(
+  purchaseIds: string[],
+  salonId: string
+): Promise<Map<string, InventoryPurchasePaymentRow[]>> {
+  const out = new Map<string, InventoryPurchasePaymentRow[]>()
+  if (purchaseIds.length === 0) return out
+  const supabase = await createClient()
+  const { data, error } = await supabase
+    .from('inventory_purchase_payments')
+    .select('*')
+    .eq('salon_id', salonId)
+    .in('purchase_id', purchaseIds)
+    .order('installment_number', { ascending: true })
+  if (error) throw error
+  for (const p of data ?? []) {
+    const arr = out.get(p.purchase_id) ?? []
+    arr.push(p)
+    out.set(p.purchase_id, arr)
+  }
+  return out
 }
 
 // Lotes ativos (saldo > 0), opcionalmente filtrados por item. Ordem FIFO (mais antigo primeiro).

@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { getSessionProfile } from '@/lib/auth/session'
+import { canViewFinancial } from '@/lib/financial/access'
 import { listAllPaymentMethods } from '@/lib/queries/payment-methods'
 import { listCardMachineTree } from '@/lib/queries/card-machines'
 import { getSalonSettings } from '@/app/actions/salon-settings'
@@ -9,6 +10,7 @@ import { CardFeeSettingsSection } from './_components/CardFeeSettingsSection'
 import { DepositSettingsSection } from './_components/DepositSettingsSection'
 import { ProductSettingsSection } from './_components/ProductSettingsSection'
 import { CommissionCycleSection } from './_components/CommissionCycleSection'
+import { CashSettingsSection } from './_components/CashSettingsSection'
 
 export default async function ConfiguracoesPage() {
   const profile = await getSessionProfile()
@@ -36,6 +38,7 @@ export default async function ConfiguracoesPage() {
       <DepositSettingsSection settings={settings} />
       <ProductSettingsSection settings={settings} />
       <CommissionCycleSection settings={settings} />
+      {canViewFinancial(profile) && <CashSettingsSection settings={settings} />}
     </div>
   )
 }

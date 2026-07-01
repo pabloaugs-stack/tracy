@@ -1,13 +1,13 @@
 import Link from 'next/link'
 
-// Shell de navegação por aba do módulo Financeiro. Por ora só "Lançamentos" tem conteúdo;
-// Comissões a pagar (Fatia 3), Caixa (Fatia 4) e Lucro real (Fatia 5) entram como abas vizinhas.
+// Shell de navegação por aba do módulo Financeiro. Lançamentos (Fatia 1), Comissões a pagar (Fatia 3)
+// e Caixa (Fatia 4) já têm conteúdo; Lucro real (Fatia 5) segue como "breve".
 type Tab = { key: string; label: string; href?: string; soon?: boolean }
 
 const TABS: Tab[] = [
   { key: 'lancamentos', label: 'Lançamentos', href: '/admin/financeiro' },
   { key: 'comissoes', label: 'Comissões a pagar', href: '/admin/financeiro/comissoes' },
-  { key: 'caixa', label: 'Caixa', soon: true },
+  { key: 'caixa', label: 'Caixa', href: '/admin/financeiro/caixa' },
   { key: 'lucro', label: 'Lucro real', soon: true },
 ]
 

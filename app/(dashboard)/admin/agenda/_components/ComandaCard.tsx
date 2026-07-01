@@ -1,6 +1,7 @@
 'use client'
 
 import type { AppointmentStatus } from '@/lib/types/database'
+import { formatAppointmentNumber } from '@/lib/appointments/format'
 
 interface Props {
   clientName: string
@@ -8,6 +9,7 @@ interface Props {
   time: string
   status: AppointmentStatus
   isClosed: boolean
+  appointmentNumber: number | null
   onClick: () => void
 }
 
@@ -25,7 +27,7 @@ function visualClasses(status: AppointmentStatus, isClosed: boolean): string {
   return 'bg-tracy-surface border-tracy-border hover:border-tracy-muted'
 }
 
-export function ComandaCard({ clientName, serviceName, time, status, isClosed, onClick }: Props) {
+export function ComandaCard({ clientName, serviceName, time, status, isClosed, appointmentNumber, onClick }: Props) {
   return (
     <button
       type="button"
@@ -35,7 +37,12 @@ export function ComandaCard({ clientName, serviceName, time, status, isClosed, o
         isClosed
       )}`}
     >
-      <p className="text-[10px] font-bold tabular-nums text-tracy-muted leading-none">{time}</p>
+      <div className="flex items-center justify-between gap-1 leading-none">
+        <p className="text-[10px] font-bold tabular-nums text-tracy-muted">{time}</p>
+        <p className="text-[10px] font-semibold tabular-nums text-tracy-muted/70">
+          {formatAppointmentNumber(appointmentNumber)}
+        </p>
+      </div>
       <p className="text-xs font-bold text-tracy-text truncate mt-0.5">{clientName}</p>
       <p className="text-[11px] text-tracy-muted truncate">{serviceName}</p>
     </button>

@@ -2,23 +2,27 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import type { ProductRow, MaterialColorRow } from '@/lib/types/database'
+import type { ProductRow, MaterialColorRow, InventoryPurchasePaymentRow } from '@/lib/types/database'
 import { stockLevel } from '@/lib/stock'
 import { StockBadge } from '@/app/(dashboard)/_components/StockBadge'
 import { ProductsTab } from '@/app/(dashboard)/admin/catalogo/_components/ProductsTab'
-import { PurchaseModal, type PurchaseItem } from './PurchaseModal'
+import { PurchaseModal, type PurchaseItem, type PurchasePaymentMethod } from './PurchaseModal'
+import { PurchasePaymentsModal } from './PurchasePaymentsModal'
 import { InsumoFormModal } from './InsumoFormModal'
 import { StockCorrectionModal } from './StockCorrectionModal'
 import type { PurchaseListItem } from '@/lib/queries/inventory'
 
 type Tab = 'compras' | 'insumos' | 'produtos'
 
+export type PurchaseWithPayments = PurchaseListItem & { payments: InventoryPurchasePaymentRow[] }
+
 interface Props {
   tab: Tab
-  purchases: PurchaseListItem[]
+  purchases: PurchaseWithPayments[]
   insumos: MaterialColorRow[]
   products: ProductRow[]
   purchaseItems: PurchaseItem[]
+  paymentMethods: PurchasePaymentMethod[]
   openingAlert: boolean
   showCommissionField: boolean
 }
@@ -34,9 +38,20 @@ function formatDate(iso: string) {
   return d && m && y ? `${d}/${m}/${y}` : iso
 }
 
-export function EstoqueTabs({ tab, purchases, insumos, products, purchaseItems, openingAlert, showCommissionField }: Props) {
+// Rótulo/cor do status de pagamento de uma compra a partir das suas parcelas.
+function paymentStatus(p: PurchaseWithPayments): { label: string; tone: string } {
+  if (p.is_opening_stock) return { label: '—', tone: 'text-tracy-muted' }
+  const n = p.payments.length
+  if (n === 0) return { label: 'à vista', tone: 'text-tracy-muted' }
+  const paid = p.payments.filter((x) => x.status === 'pago').length
+  if (paid === n) return { label: 'Pago', tone: 'text-green-400' }
+  return { label: `${paid}/${n} pagas`, tone: 'text-tracy-muted' }
+}
+
+export function EstoqueTabs({ tab, purchases, insumos, products, purchaseItems, paymentMethods, openingAlert, showCommissionField }: Props) {
   const router = useRouter()
   const [purchaseModal, setPurchaseModal] = useState<null | 'purchase' | 'opening'>(null)
+  const [managingPayment, setManagingPayment] = useState<PurchaseWithPayments | null>(null)
   const [editingInsumo, setEditingInsumo] = useState<MaterialColorRow | null>(null)
   const [correctingInsumo, setCorrectingInsumo] = useState<MaterialColorRow | null>(null)
   const [dismissed, setDismissed] = useState(true) // começa oculto até ler o localStorage (evita flash)
@@ -110,25 +125,37 @@ export function EstoqueTabs({ tab, purchases, insumos, products, purchaseItems, 
             </div>
           ) : (
             <div className="bg-tracy-surface border border-tracy-border rounded-xl overflow-hidden">
-              <div className="grid grid-cols-[120px_1fr_120px_120px] px-5 py-2 border-b border-tracy-border/40">
+              <div className="grid grid-cols-[100px_1fr_70px_110px_150px] px-5 py-2 border-b border-tracy-border/40">
                 <span className="text-[10px] font-semibold text-tracy-muted uppercase tracking-widest">Data</span>
                 <span className="text-[10px] font-semibold text-tracy-muted uppercase tracking-widest">Observações</span>
                 <span className="text-[10px] font-semibold text-tracy-muted uppercase tracking-widest text-right">Itens</span>
                 <span className="text-[10px] font-semibold text-tracy-muted uppercase tracking-widest text-right">Total</span>
+                <span className="text-[10px] font-semibold text-tracy-muted uppercase tracking-widest text-right">Pagamento</span>
               </div>
-              {purchases.map((p, i) => (
-                <div key={p.id} className={`grid grid-cols-[120px_1fr_120px_120px] items-center px-5 py-3 ${i < purchases.length - 1 ? 'border-b border-tracy-border/30' : ''}`}>
-                  <span className="text-sm text-tracy-text tabular-nums">{formatDate(p.purchase_date)}</span>
-                  <span className="text-sm text-tracy-muted truncate flex items-center gap-2">
-                    {p.notes || '—'}
-                    {p.is_opening_stock && (
-                      <span className="text-[10px] font-bold text-tracy-gold border border-tracy-gold/30 rounded px-1.5 py-0.5 tracking-wide uppercase shrink-0">Estoque inicial</span>
-                    )}
-                  </span>
-                  <span className="text-sm text-tracy-muted text-right tabular-nums">{p.lot_count}</span>
-                  <span className="text-sm text-tracy-text text-right tabular-nums">{brl(Number(p.total_cost))}</span>
-                </div>
-              ))}
+              {purchases.map((p, i) => {
+                const ps = paymentStatus(p)
+                return (
+                  <div key={p.id} className={`grid grid-cols-[100px_1fr_70px_110px_150px] items-center px-5 py-3 ${i < purchases.length - 1 ? 'border-b border-tracy-border/30' : ''}`}>
+                    <span className="text-sm text-tracy-text tabular-nums">{formatDate(p.purchase_date)}</span>
+                    <span className="text-sm text-tracy-muted truncate flex items-center gap-2">
+                      {p.notes || '—'}
+                      {p.is_opening_stock && (
+                        <span className="text-[10px] font-bold text-tracy-gold border border-tracy-gold/30 rounded px-1.5 py-0.5 tracking-wide uppercase shrink-0">Estoque inicial</span>
+                      )}
+                    </span>
+                    <span className="text-sm text-tracy-muted text-right tabular-nums">{p.lot_count}</span>
+                    <span className="text-sm text-tracy-text text-right tabular-nums">{brl(Number(p.total_cost))}</span>
+                    <div className="flex items-center justify-end gap-2">
+                      <span className={`text-[11px] ${ps.tone}`}>{ps.label}</span>
+                      {!p.is_opening_stock && (
+                        <button onClick={() => setManagingPayment(p)} className="text-[11px] text-tracy-gold hover:underline shrink-0">
+                          {p.payments.length === 0 ? 'Registrar' : 'Gerir'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>
@@ -189,8 +216,21 @@ export function EstoqueTabs({ tab, purchases, insumos, products, purchaseItems, 
         <PurchaseModal
           mode={purchaseModal}
           items={purchaseItems}
+          paymentMethods={paymentMethods}
           onClose={() => setPurchaseModal(null)}
           onSaved={() => setPurchaseModal(null)}
+        />
+      )}
+      {managingPayment && (
+        <PurchasePaymentsModal
+          purchaseId={managingPayment.id}
+          totalCost={Number(managingPayment.total_cost)}
+          purchaseDate={managingPayment.purchase_date}
+          notes={managingPayment.notes}
+          payments={managingPayment.payments}
+          paymentMethods={paymentMethods}
+          onClose={() => setManagingPayment(null)}
+          onSaved={() => setManagingPayment(null)}
         />
       )}
       {editingInsumo && (
